@@ -1,0 +1,8 @@
+-- ⚠️  This file is no longer used.
+--
+-- The schema is now managed through Supabase migrations.
+-- See supabase/migrations/ for the versioned SQL files.
+--
+-- To apply the schema to your remote project:
+--   supabase link --project-ref <your-project-ref>
+--   supabase db push
