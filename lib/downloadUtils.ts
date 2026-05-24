@@ -13,6 +13,25 @@
 
 export type DownloadState = "idle" | "preparing" | "downloading" | "done";
 
+/**
+ * Downloads a single file via Blob and triggers a native save dialog.
+ *
+ * If the Blob fetch fails (e.g. very large video exhausting available memory,
+ * or a transient network error) the file is opened in a new tab so the user
+ * can still save it manually.  The caller page is never navigated away from.
+ *
+ * Returns `true` when the Blob path succeeded, `false` when the new-tab
+ * fallback was used instead.
+ */
+export async function downloadSingleFile(url: string, filename: string): Promise<boolean> {
+  const ok = await downloadFileAsBlob(url, filename);
+  if (!ok) {
+    // Fallback: open in a new tab — user can long-press / right-click → Save
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+  return ok;
+}
+
 export interface DownloadProgress {
   current: number;
   total: number;

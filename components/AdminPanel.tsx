@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { UploadWithUrl, AdminStats } from "@/types";
 import {
+  downloadSingleFile,
   downloadFilesSequentially,
   type DownloadState,
   type DownloadProgress,
@@ -291,12 +292,14 @@ function AdminFileRow({
   selected,
   onToggleSelect,
   onDelete,
+  onDownload,
   isDeleting,
 }: {
   file: AdminFile;
   selected: boolean;
   onToggleSelect: () => void;
   onDelete: () => void;
+  onDownload: () => void;
   isDeleting: boolean;
 }) {
   return (
@@ -351,16 +354,16 @@ function AdminFileRow({
 
       {/* Actions */}
       <div className="flex items-center gap-1 flex-shrink-0">
-        <a
-          href={file.downloadUrl}
-          download={file.original_file_name}
+        <button
+          type="button"
+          onClick={onDownload}
           className="p-2 text-stone-400 hover:text-sage-600 hover:bg-sage-50 rounded-lg
                      transition-colors"
           title="Stiahnuť"
           aria-label="Stiahnuť"
         >
           <Download className="w-4 h-4" strokeWidth={1.5} />
-        </a>
+        </button>
         <button
           onClick={onDelete}
           disabled={isDeleting}
@@ -1049,6 +1052,7 @@ export default function AdminPanel() {
                     selected={selectedIds.has(file.id)}
                     onToggleSelect={() => toggleSelect(file.id)}
                     onDelete={() => deleteFile(file.id, file.original_file_name)}
+                    onDownload={() => downloadSingleFile(file.downloadUrl, file.original_file_name)}
                     isDeleting={deletingId === file.id}
                   />
                 ))}

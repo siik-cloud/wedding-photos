@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { UploadWithUrl } from "@/types";
 import {
+  downloadSingleFile,
   downloadFilesSequentially,
   type DownloadState,
   type DownloadProgress,
@@ -366,6 +367,7 @@ export default function GalleryView() {
             selected={selectedIds.has(file.id)}
             onToggle={() => toggleSelect(file.id)}
             onClick={() => openLightbox(index)}
+            onDownload={() => downloadSingleFile(file.downloadUrl, file.original_file_name)}
           />
         ))}
       </div>
@@ -451,17 +453,19 @@ export default function GalleryView() {
                 </span>
               </span>
 
-              <a
-                href={currentFile.downloadUrl}
-                download={currentFile.original_file_name}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadSingleFile(currentFile.downloadUrl, currentFile.original_file_name);
+                }}
                 className="flex items-center gap-1.5 font-sans text-sm text-white/80
                            hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5
                            rounded-lg transition-colors flex-shrink-0"
-                onClick={(e) => e.stopPropagation()}
               >
                 <Download className="w-4 h-4" strokeWidth={1.5} />
                 Stiahnuť
-              </a>
+              </button>
             </div>
           </div>
 
@@ -484,12 +488,14 @@ function GalleryTile({
   selected,
   onToggle,
   onClick,
+  onDownload,
 }: {
   file: UploadWithUrl;
   selecting: boolean;
   selected: boolean;
   onToggle: () => void;
   onClick: () => void;
+  onDownload: () => void;
 }) {
   return (
     <div
@@ -556,15 +562,14 @@ function GalleryTile({
               {file.guest_name}
             </span>
           )}
-          <a
-            href={file.downloadUrl}
-            download={file.original_file_name}
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDownload(); }}
             className="bg-white/90 hover:bg-white rounded-full p-1.5 transition-colors ml-auto"
             aria-label="Stiahnuť"
           >
             <Download className="w-3.5 h-3.5 text-stone-700" strokeWidth={1.5} />
-          </a>
+          </button>
         </div>
       )}
     </div>
