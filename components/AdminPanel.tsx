@@ -23,11 +23,13 @@ import {
 } from "lucide-react";
 import type { UploadWithUrl, AdminStats } from "@/types";
 import {
+  isMobileDevice,
   downloadSingleFile,
   downloadFilesSequentially,
   type DownloadState,
   type DownloadProgress,
 } from "@/lib/downloadUtils";
+import MobileSaveModal from "@/components/MobileSaveModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -197,6 +199,7 @@ function BulkActionBar({
   isDeleting,
   downloadState,
   downloadProgress,
+  isMobile,
 }: {
   count: number;
   onDelete: () => void;
@@ -205,6 +208,7 @@ function BulkActionBar({
   isDeleting: boolean;
   downloadState: DownloadState;
   downloadProgress: DownloadProgress;
+  isMobile: boolean;
 }) {
   if (count === 0) return null;
 
@@ -281,6 +285,18 @@ function BulkActionBar({
       >
         Zrušiť
       </button>
+
+      {/* Mobile bulk-download warning */}
+      {isMobile && count > 1 && downloadState === "idle" && (
+        <div className="basis-full flex items-start gap-2 pt-0.5">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sage-500"
+                       strokeWidth={1.5} />
+          <p className="font-sans text-xs text-stone-500 leading-relaxed">
+            Hromadné sťahovanie môže telefón uložiť do Súborov. Pre uloženie priamo
+            do galérie odporúčame ukladať fotky jednotlivo.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -602,6 +618,22 @@ export default function AdminPanel() {
   const [dlState, setDlState]       = useState<DownloadState>("idle");
   const [dlProgress, setDlProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
 
+  // Mobile save modal
+  const [isMobile, setIsMobile]     = useState(false);
+  const [mobileFile, setMobileFile] = useState<AdminFile | null>(null);
+
+  // ── Single-file download ─────────────────────────────────────────────────
+  // On mobile: open the MobileSaveModal (share sheet + long-press instruction).
+  // On desktop: direct blob download.
+
+  const handleSingleDownload = useCallback((file: AdminFile) => {
+    if (isMobile) {
+      setMobileFile(file);
+    } else {
+      downloadSingleFile(file.downloadUrl, file.original_file_name);
+    }
+  }, [isMobile]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -632,6 +664,7 @@ export default function AdminPanel() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { setIsMobile(isMobileDevice()); }, []);
 
   // ── Gallery toggle ────────────────────────────────────────────────────────
 
@@ -1034,6 +1067,7 @@ export default function AdminPanel() {
               isDeleting={bulkDeleting}
               downloadState={dlState}
               downloadProgress={dlProgress}
+              isMobile={isMobile}
             />
 
             {/* File list */}
@@ -1052,7 +1086,7 @@ export default function AdminPanel() {
                     selected={selectedIds.has(file.id)}
                     onToggleSelect={() => toggleSelect(file.id)}
                     onDelete={() => deleteFile(file.id, file.original_file_name)}
-                    onDownload={() => downloadSingleFile(file.downloadUrl, file.original_file_name)}
+                    onDownload={() => handleSingleDownload(file)}
                     isDeleting={deletingId === file.id}
                   />
                 ))}
@@ -1088,6 +1122,14 @@ export default function AdminPanel() {
         )}
 
       </div>
+
+      {/* Mobile save modal */}
+      {mobileFile && (
+        <MobileSaveModal
+          file={mobileFile}
+          onClose={() => setMobileFile(null)}
+        />
+      )}
     </>
   );
 }

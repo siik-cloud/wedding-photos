@@ -11,6 +11,59 @@
  * so `fetch()` works from any front-end origin.
  */
 
+// ─── Mobile detection ────────────────────────────────────────────────────────
+
+/** Returns `true` when running on a phone or tablet. Safe in SSR (returns `false`). */
+export function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+// ─── Web Share API ────────────────────────────────────────────────────────────
+
+export type ShareResult = "shared" | "cancelled" | "not-supported" | "error";
+
+/**
+ * Fetches `url` as a Blob, constructs a File, and passes it to
+ * `navigator.share()` (Web Share API Level 2).
+ *
+ * IMPORTANT: call this directly inside a button-click handler.
+ * Modern Safari (iOS 15+) allows the intermediate `await fetch()` because the
+ * entire call chain originates from a trusted user activation.
+ *
+ * Returns:
+ *   "shared"        — share sheet opened (user may still cancel inside it)
+ *   "cancelled"     — user dismissed the sheet
+ *   "not-supported" — browser doesn't support file sharing
+ *   "error"         — network or unexpected error
+ */
+export async function shareFileFromUrl(
+  url: string,
+  filename: string,
+  mimeType: string
+): Promise<ShareResult> {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return "not-supported";
+  }
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) return "error";
+    const blob = await res.blob();
+    const resolvedType = mimeType || blob.type || "application/octet-stream";
+    const file = new File([blob], filename, { type: resolvedType });
+    if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) {
+      return "not-supported";
+    }
+    await navigator.share({ files: [file], title: filename });
+    return "shared";
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") return "cancelled";
+    return "error";
+  }
+}
+
+// ─── Download state ───────────────────────────────────────────────────────────
+
 export type DownloadState = "idle" | "preparing" | "downloading" | "done";
 
 /**

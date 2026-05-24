@@ -11,14 +11,17 @@ import {
   Inbox,
   User,
   CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 import type { UploadWithUrl } from "@/types";
 import {
+  isMobileDevice,
   downloadSingleFile,
   downloadFilesSequentially,
   type DownloadState,
   type DownloadProgress,
 } from "@/lib/downloadUtils";
+import MobileSaveModal from "@/components/MobileSaveModal";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,7 +49,12 @@ export default function GalleryView() {
   const [showFallback, setShowFallback]         = useState(false);
   const [fallbackFiles, setFallbackFiles]       = useState<UploadWithUrl[]>([]);
 
+  // Mobile save modal
+  const [isMobile, setIsMobile]           = useState(false);
+  const [mobileFile, setMobileFile]       = useState<UploadWithUrl | null>(null);
+
   useEffect(() => { fetchGallery(); }, []);
+  useEffect(() => { setIsMobile(isMobileDevice()); }, []);
 
   const fetchGallery = async () => {
     setLoading(true);
@@ -121,6 +129,18 @@ export default function GalleryView() {
   const selectAll   = () => setSelectedIds(new Set(files.map((f) => f.id)));
   const clearSelect = () => setSelectedIds(new Set());
   const allSelected = files.length > 0 && files.every((f) => selectedIds.has(f.id));
+
+  // ── Single-file download ─────────────────────────────────────────────────
+  // On mobile: open the MobileSaveModal (share sheet + long-press instruction).
+  // On desktop: direct blob download (existing behaviour).
+
+  const handleSingleDownload = useCallback((file: UploadWithUrl) => {
+    if (isMobile) {
+      setMobileFile(file);
+    } else {
+      downloadSingleFile(file.downloadUrl, file.original_file_name);
+    }
+  }, [isMobile]);
 
   // ── Bulk download ───────────────────────────────────────────────────────────
   //
@@ -239,7 +259,7 @@ export default function GalleryView() {
 
       {/* ── Selection action bar ──────────────────────────────────────────────── */}
       {selecting && (
-        <div className="mb-4 flex items-center gap-3 bg-white border border-sage-200
+        <div className="mb-4 flex flex-wrap items-center gap-3 bg-white border border-sage-200
                         rounded-xl px-4 py-3 shadow-sm shadow-sage-900/5">
           {/* Count / status */}
           <div className="flex-1 min-w-0">
@@ -297,6 +317,18 @@ export default function GalleryView() {
             >
               Nové sťahovanie
             </button>
+          )}
+
+          {/* Mobile bulk-download warning */}
+          {isMobile && selectedCount > 1 && downloadState === "idle" && (
+            <div className="basis-full flex items-start gap-2 pt-1">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sage-500"
+                           strokeWidth={1.5} />
+              <p className="font-sans text-xs text-stone-500 leading-relaxed">
+                Hromadné sťahovanie môže telefón uložiť do Súborov. Pre uloženie priamo
+                do galérie odporúčame ukladať fotky jednotlivo.
+              </p>
+            </div>
           )}
         </div>
       )}
@@ -367,7 +399,7 @@ export default function GalleryView() {
             selected={selectedIds.has(file.id)}
             onToggle={() => toggleSelect(file.id)}
             onClick={() => openLightbox(index)}
-            onDownload={() => downloadSingleFile(file.downloadUrl, file.original_file_name)}
+            onDownload={() => handleSingleDownload(file)}
           />
         ))}
       </div>
@@ -457,14 +489,14 @@ export default function GalleryView() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  downloadSingleFile(currentFile.downloadUrl, currentFile.original_file_name);
+                  handleSingleDownload(currentFile);
                 }}
                 className="flex items-center gap-1.5 font-sans text-sm text-white/80
                            hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5
                            rounded-lg transition-colors flex-shrink-0"
               >
                 <Download className="w-4 h-4" strokeWidth={1.5} />
-                Stiahnuť
+                {isMobile ? "Uložiť" : "Stiahnuť"}
               </button>
             </div>
           </div>
@@ -475,6 +507,14 @@ export default function GalleryView() {
             {lightboxIndex + 1} / {files.length}
           </div>
         </div>
+      )}
+
+      {/* Mobile save modal */}
+      {mobileFile && (
+        <MobileSaveModal
+          file={mobileFile}
+          onClose={() => setMobileFile(null)}
+        />
       )}
     </>
   );
