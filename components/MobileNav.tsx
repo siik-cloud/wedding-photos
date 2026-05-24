@@ -1,13 +1,26 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Info, Camera, Images } from "lucide-react";
 
 export default function MobileNav() {
   const pathname = usePathname();
 
+  // Hide while a lightbox is open — GalleryView sets data-lightbox-open on <body>.
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  useEffect(() => {
+    const check = () =>
+      setLightboxOpen(document.body.hasAttribute("data-lightbox-open"));
+    check();
+    const obs = new MutationObserver(check);
+    obs.observe(document.body, { attributes: true, attributeFilter: ["data-lightbox-open"] });
+    return () => obs.disconnect();
+  }, []);
+
   if (pathname.startsWith("/admin")) return null;
+  if (lightboxOpen) return null;
 
   // "Info" is active when on the homepage (info lives there)
   const isHome    = pathname === "/";

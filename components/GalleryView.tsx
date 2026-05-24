@@ -161,6 +161,8 @@ export default function GalleryView() {
     document.body.style.top        = `-${scrollY}px`;
     document.body.style.width      = "100%";
     document.body.style.overflowY  = "scroll"; // keeps scrollbar width so layout doesn't jump
+    // Signal to MobileNav (and any other nav) that the lightbox is open so they can hide.
+    document.body.setAttribute("data-lightbox-open", "");
 
     return () => {
       window.removeEventListener("keydown", handler);
@@ -168,6 +170,7 @@ export default function GalleryView() {
       document.body.style.top       = "";
       document.body.style.width     = "";
       document.body.style.overflowY = "";
+      document.body.removeAttribute("data-lightbox-open");
       window.scrollTo(0, scrollY);  // restore exact scroll position
     };
   }, [lightboxIndex, goPrev, goNext]);
@@ -270,7 +273,11 @@ export default function GalleryView() {
       }
       if (!downloadUrl) return; // couldn't get a URL — fail silently
 
+      // Desktop always downloads directly — Web Share API opens a share sheet that
+      // doesn't make sense on desktop and may do nothing useful.
+      // Mobile uses Web Share API when available; falls back to blob download.
       const hasShare =
+        isMobile &&
         typeof navigator !== "undefined" &&
         typeof navigator.share === "function";
 
@@ -291,7 +298,7 @@ export default function GalleryView() {
     } finally {
       setSavingId(null);
     }
-  }, []);
+  }, [isMobile]);
 
   // ── Swipe handlers ───────────────────────────────────────────────────────
   // Place onTouchStart / onTouchEnd on the lightbox overlay.
@@ -648,7 +655,7 @@ export default function GalleryView() {
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
       {currentFile && lightboxIndex !== null && (
         <div
-          className="fixed inset-0 z-50 bg-black/95"
+          className="fixed inset-0 z-[9999] bg-black/95"
           onTouchStart={handleLightboxTouchStart}
           onTouchEnd={handleLightboxTouchEnd}
           onClick={closeLightbox}
@@ -676,9 +683,10 @@ export default function GalleryView() {
           </div>
 
           {/* ── Media area ────────────────────────────────────────────────────────
-              pt-14 / pb-20 keeps the media content within the safe zone between the
-              two bars. Arrows and media are positioned absolutely inside this layer. */}
-          <div className="absolute inset-0 flex items-center justify-center pt-14 pb-20">
+              pt-14 keeps the image below the top bar.
+              pb-28 (112px) keeps it above the bottom action bar + iPhone safe area.
+              Arrows and media content live inside this layer. */}
+          <div className="absolute inset-0 flex items-center justify-center pt-14 pb-28">
             {/* Prev — loops around */}
             {files.length > 1 && (
               <button
@@ -742,14 +750,14 @@ export default function GalleryView() {
           </div>
 
           {/* ── Bottom bar: uploader + save ───────────────────────────────────────
-              Absolutely positioned so it is ALWAYS visible regardless of image
-              aspect ratio. Safe-area padding ensures it clears the home indicator
-              on iPhone. z-20 keeps it above the media layer. */}
+              fixed bottom-0 z-[9999]: above MobileNav (z-50), above all page overlays.
+              This is the key guarantee — no portrait image, flex-col bug, or nav layer
+              can push this off screen. Safe-area padding clears iPhone home indicator. */}
           <div
-            className="absolute bottom-0 left-0 right-0 z-20 flex items-center
-                       justify-between px-4 pt-3 gap-3 bg-gradient-to-t from-black/60
+            className="fixed bottom-0 left-0 right-0 z-[9999] flex items-center
+                       justify-between px-4 pt-3 gap-3 bg-gradient-to-t from-black/75
                        to-transparent"
-            style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
+            style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}
             onClick={(e) => e.stopPropagation()}
           >
             <span className="flex items-center gap-1.5 min-w-0">
