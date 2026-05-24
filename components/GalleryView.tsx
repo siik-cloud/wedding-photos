@@ -24,7 +24,8 @@ import {
   type DownloadState,
   type DownloadProgress,
 } from "@/lib/downloadUtils";
-import MobileSaveModal from "@/components/MobileSaveModal";
+// MobileSaveModal intentionally not used in the gallery:
+// the save button triggers a direct share/download action with no intermediate modal.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -53,9 +54,11 @@ export default function GalleryView() {
   const [fallbackFiles, setFallbackFiles]       = useState<UploadWithUrl[]>([]);
   const [downloadResult, setDownloadResult]     = useState<{ success: number; failed: number } | null>(null);
 
-  // Mobile save modal
-  const [isMobile, setIsMobile]           = useState(false);
-  const [mobileFile, setMobileFile]       = useState<UploadWithUrl | null>(null);
+  // Mobile detection (used for button labels and bulk-download warning)
+  const [isMobile, setIsMobile] = useState(false);
+
+  // ID of the file currently being fetched for share/download (drives loading indicator)
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   // Lightbox: track whether the current image/video failed to load
   const [lightboxMediaError, setLightboxMediaError] = useState(false);
@@ -167,42 +170,34 @@ export default function GalleryView() {
   const clearSelect = () => setSelectedIds(new Set());
   const allSelected = files.length > 0 && files.every((f) => selectedIds.has(f.id));
 
-  // ── Single-file download ─────────────────────────────────────────────────
-  // On mobile: open the MobileSaveModal (share sheet + long-press instruction).
-  // On desktop: direct blob download (existing behaviour).
+  // ── Unified save handler ──────────────────────────────────────────────────
+  // Used by both the grid-tile download button and the lightbox action button.
+  // No intermediate modal — triggers Web Share API immediately on supported
+  // devices (iOS 15+, Android Chrome), falls back to blob download otherwise.
 
-  const handleSingleDownload = useCallback((file: UploadWithUrl) => {
-    if (isMobile) {
-      setMobileFile(file);
-    } else {
-      downloadSingleFile(file.downloadUrl, file.original_file_name);
-    }
-  }, [isMobile]);
+  const handleSave = useCallback(async (file: UploadWithUrl) => {
+    setSavingId(file.id);
+    try {
+      const hasShare =
+        typeof navigator !== "undefined" &&
+        typeof navigator.share === "function";
 
-  // ── Lightbox save ────────────────────────────────────────────────────────
-  // Called directly from the save button — no modal layer.
-  // On devices with Web Share API (iOS 15+, Android Chrome) we invoke the share
-  // sheet with the actual File so the user can save to Photos / Drive / etc.
-  // If the API is unavailable or fails, we fall back to a blob download.
-
-  const handleLightboxSave = useCallback(async (file: UploadWithUrl) => {
-    const hasShare =
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function";
-
-    if (hasShare) {
-      const res = await shareFileFromUrl(
-        file.downloadUrl,
-        file.original_file_name,
-        file.mime_type
-      );
-      // "cancelled" means the user dismissed the share sheet — nothing more to do.
-      // "not-supported" / "error" → fall through to blob download.
-      if (res === "not-supported" || res === "error") {
+      if (hasShare) {
+        const res = await shareFileFromUrl(
+          file.downloadUrl,
+          file.original_file_name,
+          file.mime_type
+        );
+        // "cancelled" — user dismissed the sheet, nothing more to do.
+        // "not-supported" / "error" — fall through to blob download.
+        if (res === "not-supported" || res === "error") {
+          downloadSingleFile(file.downloadUrl, file.original_file_name);
+        }
+      } else {
         downloadSingleFile(file.downloadUrl, file.original_file_name);
       }
-    } else {
-      downloadSingleFile(file.downloadUrl, file.original_file_name);
+    } finally {
+      setSavingId(null);
     }
   }, []);
 
@@ -497,7 +492,8 @@ export default function GalleryView() {
             selected={selectedIds.has(file.id)}
             onToggle={() => toggleSelect(file.id)}
             onClick={() => openLightbox(index)}
-            onDownload={() => handleSingleDownload(file)}
+            onDownload={() => handleSave(file)}
+            isSaving={savingId === file.id}
           />
         ))}
       </div>
@@ -607,28 +603,28 @@ export default function GalleryView() {
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handleLightboxSave(currentFile);
+                handleSave(currentFile);
               }}
+              disabled={savingId === currentFile.id}
               className="flex items-center gap-1.5 font-sans text-sm text-white/80
                          hover:text-white bg-white/10 hover:bg-white/20 px-3 py-2
-                         rounded-xl transition-colors flex-shrink-0"
+                         rounded-xl transition-colors flex-shrink-0 disabled:opacity-60"
             >
-              {isMobile
-                ? <Share2  className="w-4 h-4" strokeWidth={1.5} />
-                : <Download className="w-4 h-4" strokeWidth={1.5} />}
-              {isMobile ? "Uložiť" : "Stiahnuť"}
+              {savingId === currentFile.id ? (
+                <Loader2 className="w-4 h-4 animate-spin" strokeWidth={1.5} />
+              ) : isMobile ? (
+                <Share2 className="w-4 h-4" strokeWidth={1.5} />
+              ) : (
+                <Download className="w-4 h-4" strokeWidth={1.5} />
+              )}
+              {savingId === currentFile.id
+                ? "Pripravujem…"
+                : isMobile ? "Zdieľať / uložiť" : "Stiahnuť"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Mobile save modal */}
-      {mobileFile && (
-        <MobileSaveModal
-          file={mobileFile}
-          onClose={() => setMobileFile(null)}
-        />
-      )}
     </>
   );
 }
@@ -642,6 +638,7 @@ function GalleryTile({
   onToggle,
   onClick,
   onDownload,
+  isSaving,
 }: {
   file: UploadWithUrl;
   selecting: boolean;
@@ -649,11 +646,12 @@ function GalleryTile({
   onToggle: () => void;
   onClick: () => void;
   onDownload: () => void;
+  isSaving: boolean;
 }) {
-  // Track per-tile load failures so we can show a graceful fallback
-  // instead of a broken-image icon or an invisible element.
-  const [imgError,   setImgError]   = useState(false);
-  const [videoError, setVideoError] = useState(false);
+  // Per-tile load error states for graceful fallback rendering
+  const [imgError,   setImgError]   = useState(false); // main photo <img> failed
+  const [thumbError, setThumbError] = useState(false); // pre-generated video thumbnail <img> failed
+  const [videoError, setVideoError] = useState(false); // <video> element fallback failed
 
   return (
     <div
@@ -663,21 +661,34 @@ function GalleryTile({
       onClick={selecting ? onToggle : onClick}
     >
       {file.file_type === "video" ? (
-        /* preload="metadata" loads only the first keyframe — no full download needed.
-           If the video URL is broken/missing, videoError hides the element so the
-           dark background + play-button overlay remain as a usable fallback. */
+        /* Three-tier video thumbnail strategy:
+           1. Pre-generated JPEG (thumbnailUrl) — stored in Supabase, works on all
+              browsers including iOS Safari which can't render <video> poster frames
+              without user interaction.
+           2. <video preload="metadata" #t=0.001> — hint browser to seek to first
+              frame; works on most desktop browsers as a fallback for videos without
+              a stored thumbnail.
+           3. Dark bg + play icon only — silent ultimate fallback when both fail. */
         <div className="w-full h-full relative bg-stone-900 overflow-hidden">
-          {!videoError && (
+          {file.thumbnailUrl && !thumbError ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={file.thumbnailUrl}
+              alt=""
+              className="w-full h-full object-cover"
+              onError={() => setThumbError(true)}
+            />
+          ) : !videoError ? (
             // eslint-disable-next-line jsx-a11y/media-has-caption
             <video
-              src={file.url}
+              src={`${file.url}#t=0.001`}
               preload="metadata"
               muted
               playsInline
               className="w-full h-full object-cover"
               onError={() => setVideoError(true)}
             />
-          )}
+          ) : null}
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-black/50 rounded-full p-2.5">
               <Play className="w-5 h-5 text-white" strokeWidth={1.5} fill="white" />
@@ -746,10 +757,16 @@ function GalleryTile({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onDownload(); }}
-            className="bg-white/90 hover:bg-white rounded-full p-1.5 transition-colors ml-auto"
-            aria-label="Stiahnuť"
+            disabled={isSaving}
+            className="bg-white/90 hover:bg-white rounded-full p-1.5 transition-colors
+                       ml-auto disabled:opacity-60"
+            aria-label={isSaving ? "Pripravujem…" : "Stiahnuť"}
           >
-            <Download className="w-3.5 h-3.5 text-stone-700" strokeWidth={1.5} />
+            {isSaving ? (
+              <Loader2 className="w-3.5 h-3.5 text-stone-700 animate-spin" strokeWidth={1.5} />
+            ) : (
+              <Download className="w-3.5 h-3.5 text-stone-700" strokeWidth={1.5} />
+            )}
           </button>
         </div>
       )}

@@ -16,20 +16,39 @@ export async function GET() {
   try {
     const supabase = getSupabaseServer();
 
-    const { data, error } = await supabase
-      .from("uploads")
-      .select(
-        "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at, deleted_at"
-      )
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+    // Fetch uploads — try with thumbnail_path, fall back without if column is missing
+    let uploads: Upload[] = [];
+    {
+      const withThumb = await supabase
+        .from("uploads")
+        .select(
+          "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at, deleted_at, thumbnail_path"
+        )
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("[admin/files] DB error:", error);
-      return NextResponse.json({ error: "Chyba databázy" }, { status: 500 });
+      if (withThumb.error?.code === "42703") {
+        console.warn("[admin/files] thumbnail_path column missing — fetching without it");
+        const noThumb = await supabase
+          .from("uploads")
+          .select(
+            "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at, deleted_at"
+          )
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false });
+
+        if (noThumb.error) {
+          console.error("[admin/files] DB error:", noThumb.error);
+          return NextResponse.json({ error: "Chyba databázy" }, { status: 500 });
+        }
+        uploads = (noThumb.data ?? []) as Upload[];
+      } else if (withThumb.error) {
+        console.error("[admin/files] DB error:", withThumb.error);
+        return NextResponse.json({ error: "Chyba databázy" }, { status: 500 });
+      } else {
+        uploads = (withThumb.data ?? []) as Upload[];
+      }
     }
-
-    const uploads = (data ?? []) as Upload[];
 
     // Build stats
     const stats: AdminStats = {
@@ -43,11 +62,16 @@ export async function GET() {
       return NextResponse.json({ files: [], stats });
     }
 
-    // Batch generate signed URLs — one API call for all files
-    const paths = uploads.map((u) => u.storage_path);
+    // Batch generate signed URLs for uploads + thumbnails in one call
+    const thumbPaths = uploads
+      .filter((u) => u.thumbnail_path)
+      .map((u) => u.thumbnail_path as string);
+
+    const allPaths = [...uploads.map((u) => u.storage_path), ...thumbPaths];
+
     const { data: signedData, error: signedError } = await supabase.storage
       .from(BUCKET_NAME)
-      .createSignedUrls(paths, SIGNED_URL_EXPIRY);
+      .createSignedUrls(allPaths, SIGNED_URL_EXPIRY);
 
     if (signedError || !signedData) {
       console.error("[admin/files] Signed URL error:", signedError);
@@ -67,8 +91,11 @@ export async function GET() {
 
     const filesWithUrls: UploadWithUrl[] = uploads.map((upload) => ({
       ...upload,
-      url: urlMap.get(upload.storage_path) ?? "",
-      downloadUrl: urlMap.get(upload.storage_path) ?? "",
+      url:          urlMap.get(upload.storage_path) ?? "",
+      downloadUrl:  urlMap.get(upload.storage_path) ?? "",
+      thumbnailUrl: upload.thumbnail_path
+        ? urlMap.get(upload.thumbnail_path)
+        : undefined,
     }));
 
     return NextResponse.json({ files: filesWithUrls, stats });

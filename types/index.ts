@@ -9,11 +9,19 @@ export interface Upload {
   guest_name: string | null;
   created_at: string;
   deleted_at: string | null;
+  /**
+   * Storage path for the pre-generated video thumbnail JPEG.
+   * Requires DB migration: ALTER TABLE uploads ADD COLUMN IF NOT EXISTS thumbnail_path TEXT;
+   * null for images or videos uploaded before thumbnail generation was added.
+   */
+  thumbnail_path: string | null;
 }
 
 export interface UploadWithUrl extends Upload {
   url: string;
   downloadUrl: string;
+  /** Signed URL for the thumbnail image. Only present for videos with a thumbnail. */
+  thumbnailUrl?: string;
 }
 
 export interface Settings {
@@ -45,4 +53,6 @@ export interface ConfirmUploadRequest {
   fileSize: number;
   mimeType: string;
   guestName: string | null;
+  /** Storage path of the pre-generated thumbnail JPEG, if available. */
+  thumbnailPath?: string | null;
 }

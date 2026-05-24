@@ -345,6 +345,10 @@ function AdminFileRow({
         {file.file_type === "image" && file.url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={file.url} alt="" className="w-full h-full object-cover" loading="lazy" />
+        ) : file.file_type === "video" && file.thumbnailUrl ? (
+          // Pre-generated JPEG thumbnail — reliable on all browsers incl. iOS
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={file.thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
         ) : file.file_type === "video" ? (
           <Video className="w-5 h-5 text-blue-400" strokeWidth={1.5} />
         ) : (
@@ -421,6 +425,9 @@ function TrashFileRow({
         {file.file_type === "image" && file.url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={file.url} alt="" className="w-full h-full object-cover grayscale" loading="lazy" />
+        ) : file.file_type === "video" && file.thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={file.thumbnailUrl} alt="" className="w-full h-full object-cover grayscale" loading="lazy" />
         ) : file.file_type === "video" ? (
           <Video className="w-5 h-5 text-stone-300" strokeWidth={1.5} />
         ) : (

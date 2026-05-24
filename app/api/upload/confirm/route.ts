@@ -23,7 +23,7 @@ function getFileType(mimeType: string, fileName: string): "image" | "video" | "o
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as ConfirmUploadRequest;
-    const { storagePath, originalFileName, fileSize, mimeType, guestName } = body;
+    const { storagePath, originalFileName, fileSize, mimeType, guestName, thumbnailPath } = body;
 
     // Basic validation
     if (!storagePath || typeof storagePath !== "string") {
@@ -68,18 +68,31 @@ export async function POST(req: NextRequest) {
     // Extract the sanitised file_name from storage path
     const fileName = storagePath.split("/").pop() ?? storagePath;
 
+    // Validate thumbnail path if supplied (must match our own thumbnails/ prefix pattern)
+    const safeThumbnailPath: string | null =
+      typeof thumbnailPath === "string" &&
+      /^thumbnails\/\d{4}\/\d{2}\/[A-Za-z0-9_-]+\.jpg$/.test(thumbnailPath)
+        ? thumbnailPath
+        : null;
+
+    // Build insert payload — only include thumbnail_path when it's non-null so that
+    // installs without the DB migration (column doesn't exist yet) continue to work.
+    // Postgres rejects unknown columns, so we must not send null for a missing column.
+    const insertPayload: Record<string, unknown> = {
+      file_name:          fileName,
+      original_file_name: originalFileName.slice(0, 500),
+      file_type:          fileType,
+      mime_type:          safeMime,
+      file_size:          typeof fileSize === "number" ? fileSize : 0,
+      storage_path:       storagePath,
+      guest_name:         safeGuestName,
+    };
+    if (safeThumbnailPath) insertPayload.thumbnail_path = safeThumbnailPath;
+
     // Insert record into uploads table
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: record, error: dbError } = await (supabase.from("uploads") as any)
-      .insert({
-        file_name: fileName,
-        original_file_name: originalFileName.slice(0, 500),
-        file_type: fileType,
-        mime_type: safeMime,
-        file_size: typeof fileSize === "number" ? fileSize : 0,
-        storage_path: storagePath,
-        guest_name: safeGuestName,
-      })
+      .insert(insertPayload)
       .select("id")
       .single();
 

@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { createId } from "@/lib/utils";
 import { compressImage, isCompressible } from "@/lib/imageCompression";
+import { generateVideoThumbnail } from "@/lib/videoThumbnail";
 
 const ACCEPTED_EXTENSIONS = [
   ".jpg", ".jpeg", ".png", ".gif", ".webp",
@@ -425,6 +426,40 @@ export default function UploadForm() {
         xhr.send(toUpload);
       });
 
+      // ── Video thumbnail generation ─────────────────────────────────────────
+      // For videos: generate a JPEG thumbnail from the local file (before upload).
+      // We use the original file (blob URL) to avoid CORS canvas-taint issues.
+      // Failure is non-fatal — the video uploads fine without a thumbnail.
+      let thumbnailPath: string | null = null;
+      if (item.isVideo) {
+        try {
+          updateItem(item.id, { progress: 97 }); // pause briefly at 97% while generating
+          const thumb = await generateVideoThumbnail(item.file);
+          if (thumb) {
+            const thumbInitRes = await fetch("/api/upload/thumbnail", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fileSize: thumb.blob.size }),
+            });
+            if (thumbInitRes.ok) {
+              const thumbData = await thumbInitRes.json() as {
+                signedUrl: string;
+                thumbnailPath: string;
+              };
+              const thumbPutRes = await fetch(thumbData.signedUrl, {
+                method: "PUT",
+                body: thumb.blob,
+                headers: { "Content-Type": "image/jpeg" },
+              });
+              if (thumbPutRes.ok) thumbnailPath = thumbData.thumbnailPath;
+            }
+          }
+        } catch (thumbErr) {
+          // Thumbnail is optional — log only, continue to confirm
+          console.warn("[upload] thumbnail generation failed:", thumbErr);
+        }
+      }
+
       const confirmRes = await fetch("/api/upload/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -434,6 +469,7 @@ export default function UploadForm() {
           fileSize: toUpload.size,
           mimeType: toUpload.type || "application/octet-stream",
           guestName: name || null,
+          thumbnailPath,
         }),
       });
 
@@ -441,9 +477,9 @@ export default function UploadForm() {
         // The bytes landed in storage but the DB record failed.
         // Show an error so the user can retry — a retry will re-upload cleanly.
         console.warn("[upload] confirm failed for", storagePath);
-        const body = await confirmRes.json().catch(() => ({}));
+        const errBody = await confirmRes.json().catch(() => ({}));
         throw new Error(
-          (body as { error?: string }).error || "Nahrávanie sa nepodarilo dokončiť — skús znova"
+          (errBody as { error?: string }).error || "Nahrávanie sa nepodarilo dokončiť — skús znova"
         );
       }
 
