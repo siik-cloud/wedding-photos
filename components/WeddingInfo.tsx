@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, CalendarDays, UtensilsCrossed, MapPin } from "lucide-react";
+import { ChevronDown, CalendarDays, UtensilsCrossed } from "lucide-react";
 
 function Section({
   icon: Icon,
@@ -80,18 +80,6 @@ function CourseRow({ course, dish }: { course: string; dish: string }) {
         {course}
       </span>
       <span className="font-sans text-stone-700 text-sm leading-snug">{dish}</span>
-    </div>
-  );
-}
-
-/* Practical info row */
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex gap-3 py-2.5 border-b border-sage-50 last:border-0">
-      <span className="font-sans text-xs text-stone-400 w-28 flex-shrink-0 pt-0.5 font-medium uppercase tracking-wide">
-        {label}
-      </span>
-      <span className="font-sans text-stone-700 text-sm">{value}</span>
     </div>
   );
 }

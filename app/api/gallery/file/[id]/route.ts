@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const enabled = await isGalleryEnabled();
@@ -30,7 +30,7 @@ export async function GET(
       );
     }
 
-    const { id } = params;
+    const { id } = await params;
     if (!id) {
       return NextResponse.json({ error: "Chýba ID súboru" }, { status: 400 });
     }
