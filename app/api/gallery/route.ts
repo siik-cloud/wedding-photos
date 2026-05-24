@@ -82,12 +82,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ files: [], hasMore: false });
     }
 
-    // Collect all storage paths that need signing
+    // Collect paths that need signing.
+    // Images WITH a thumbnail: sign only the thumbnail (the original is fetched lazily
+    // by the lightbox via GET /api/gallery/file/[id] — no wasted bandwidth on the grid).
+    // Everything else (images without thumbnail, videos, other): sign the original.
+    const originalPaths = uploads
+      .filter((u) => !(u.file_type === "image" && u.thumbnail_path))
+      .map((u) => u.storage_path);
+
     const thumbPaths = uploads
       .filter((u) => u.thumbnail_path)
       .map((u) => u.thumbnail_path as string);
 
-    const allPaths = [...uploads.map((u) => u.storage_path), ...thumbPaths];
+    const allPaths = [...originalPaths, ...thumbPaths];
 
     const { data: signedData, error: signedError } = await supabase.storage
       .from(BUCKET_NAME)
@@ -109,9 +116,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Merge uploads with their signed URLs
+    // Merge uploads with their signed URLs.
+    // Images with thumbnail_path: url="" (original fetched lazily), thumbnailUrl=thumb URL.
+    // Everything else: url=original signed URL, thumbnailUrl=thumb URL if available.
     const filesWithUrls: UploadWithUrl[] = uploads
       .map((upload) => {
+        if (upload.file_type === "image" && upload.thumbnail_path) {
+          // Use thumbnail for grid; lightbox fetches original on demand
+          const thumbUrl = urlMap.get(upload.thumbnail_path);
+          if (!thumbUrl) return null; // no usable URL — skip this item
+          const entry: UploadWithUrl = { ...upload, url: "", downloadUrl: "" };
+          entry.thumbnailUrl = thumbUrl;
+          return entry;
+        }
+        // Original URL available (images without thumb, videos, other)
         const url = urlMap.get(upload.storage_path);
         if (!url) return null;
         const entry: UploadWithUrl = { ...upload, url, downloadUrl: url };

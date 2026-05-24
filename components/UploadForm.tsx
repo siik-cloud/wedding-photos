@@ -12,6 +12,7 @@ import Link from "next/link";
 import { createId } from "@/lib/utils";
 import { compressImage, isCompressible } from "@/lib/imageCompression";
 import { generateVideoThumbnail } from "@/lib/videoThumbnail";
+import { generateImageThumbnail } from "@/lib/imageThumbnail";
 
 const ACCEPTED_EXTENSIONS = [
   ".jpg", ".jpeg", ".png", ".gif", ".webp",
@@ -426,11 +427,13 @@ export default function UploadForm() {
         xhr.send(toUpload);
       });
 
-      // ── Video thumbnail generation ─────────────────────────────────────────
-      // For videos: generate a JPEG thumbnail from the local file (before upload).
-      // We use the original file (blob URL) to avoid CORS canvas-taint issues.
-      // Failure is non-fatal — the video uploads fine without a thumbnail.
+      // ── Thumbnail generation ───────────────────────────────────────────────
+      // Generate a 600 px JPEG thumbnail from the local file before confirming.
+      // For videos: Canvas is not involved; we seek the <video> element to frame 0.
+      // For images: Canvas-based downscale (skips HEIC/GIF which return null).
+      // Failure is non-fatal — the file uploads fine without a thumbnail.
       let thumbnailPath: string | null = null;
+
       if (item.isVideo) {
         try {
           updateItem(item.id, { progress: 97 }); // pause briefly at 97% while generating
@@ -455,8 +458,35 @@ export default function UploadForm() {
             }
           }
         } catch (thumbErr) {
-          // Thumbnail is optional — log only, continue to confirm
-          console.warn("[upload] thumbnail generation failed:", thumbErr);
+          console.warn("[upload] video thumbnail generation failed:", thumbErr);
+        }
+      } else {
+        // Images: generate a 600 px JPEG thumbnail for fast grid display.
+        // Returns null for HEIC/HEIF and GIF — those are skipped gracefully.
+        try {
+          updateItem(item.id, { progress: 97 });
+          const thumb = await generateImageThumbnail(toUpload);
+          if (thumb) {
+            const thumbInitRes = await fetch("/api/upload/thumbnail", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fileSize: thumb.blob.size }),
+            });
+            if (thumbInitRes.ok) {
+              const thumbData = await thumbInitRes.json() as {
+                signedUrl: string;
+                thumbnailPath: string;
+              };
+              const thumbPutRes = await fetch(thumbData.signedUrl, {
+                method: "PUT",
+                body: thumb.blob,
+                headers: { "Content-Type": "image/jpeg" },
+              });
+              if (thumbPutRes.ok) thumbnailPath = thumbData.thumbnailPath;
+            }
+          }
+        } catch (thumbErr) {
+          console.warn("[upload] image thumbnail generation failed:", thumbErr);
         }
       }
 

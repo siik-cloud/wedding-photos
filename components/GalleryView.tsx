@@ -73,6 +73,15 @@ export default function GalleryView() {
   const swipeTouchStartX = useRef<number | null>(null);
   const swipeTouchStartY = useRef<number | null>(null);
 
+  // Lazy-fetched original signed URLs for images whose url="" (thumbnail-only in gallery API).
+  // Using a ref so handleSave / downloadSelected can read the latest value without a
+  // dependency on a stateful Map (which would cause handleSave to be recreated on every
+  // fetch, triggering unnecessary re-renders across all tiles).
+  const fetchedUrlsRef = useRef<Map<string, string>>(new Map());
+  // URL used by the lightbox — set immediately when url≠"", or lazily after a fetch.
+  const [lightboxOriginalUrl, setLightboxOriginalUrl] = useState<string>("");
+  const [fetchingOriginalUrl, setFetchingOriginalUrl] = useState(false);
+
   const fetchGallery = useCallback(async (pageNum: number) => {
     if (pageNum === 0) {
       setLoading(true);
@@ -163,6 +172,54 @@ export default function GalleryView() {
     };
   }, [lightboxIndex, goPrev, goNext]);
 
+  // Fetch the original signed URL when the lightbox opens for an image-with-thumbnail
+  // (those have url="" in the gallery API response — original is not pre-signed at page load).
+  // The result is cached in fetchedUrlsRef so subsequent opens of the same file are instant.
+  useEffect(() => {
+    if (lightboxIndex === null) {
+      // Lightbox closed — clear the stale URL so the next open doesn't flash old content.
+      setLightboxOriginalUrl("");
+      setFetchingOriginalUrl(false);
+      return;
+    }
+
+    const file = files[lightboxIndex];
+    if (!file) return;
+    let cancelled = false;
+
+    if (file.url !== "") {
+      // Original URL already available (videos, images without thumbnails).
+      setLightboxOriginalUrl(file.url);
+      return;
+    }
+
+    // Check the in-memory cache first.
+    const cached = fetchedUrlsRef.current.get(file.id);
+    if (cached) {
+      setLightboxOriginalUrl(cached);
+      return;
+    }
+
+    // Need to fetch from the server.
+    setLightboxOriginalUrl("");
+    setFetchingOriginalUrl(true);
+
+    fetch(`/api/gallery/file/${file.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { url?: string } | null) => {
+        if (cancelled) return;
+        const url = data?.url;
+        if (url) {
+          fetchedUrlsRef.current.set(file.id, url);
+          setLightboxOriginalUrl(url);
+        }
+      })
+      .catch(() => { /* fail silently — lightboxMediaError will show the placeholder */ })
+      .finally(() => { if (!cancelled) setFetchingOriginalUrl(false); });
+
+    return () => { cancelled = true; };
+  }, [lightboxIndex, files]);
+
   // ── Selection ───────────────────────────────────────────────────────────────
 
   const toggleSelect = (id: string) => {
@@ -200,23 +257,36 @@ export default function GalleryView() {
   const handleSave = useCallback(async (file: UploadWithUrl) => {
     setSavingId(file.id);
     try {
+      // downloadUrl may be "" for images that have a thumbnail (original is lazy-loaded).
+      // Resolve it from the cache, or fetch it now.
+      let downloadUrl: string = file.downloadUrl || fetchedUrlsRef.current.get(file.id) || "";
+      if (!downloadUrl) {
+        const res = await fetch(`/api/gallery/file/${file.id}`);
+        if (res.ok) {
+          const data = await res.json() as { url?: string };
+          downloadUrl = data.url ?? "";
+          if (downloadUrl) fetchedUrlsRef.current.set(file.id, downloadUrl);
+        }
+      }
+      if (!downloadUrl) return; // couldn't get a URL — fail silently
+
       const hasShare =
         typeof navigator !== "undefined" &&
         typeof navigator.share === "function";
 
       if (hasShare) {
         const res = await shareFileFromUrl(
-          file.downloadUrl,
+          downloadUrl,
           file.original_file_name,
           file.mime_type
         );
         // "cancelled" — user dismissed the sheet, nothing more to do.
         // "not-supported" / "error" — fall through to blob download.
         if (res === "not-supported" || res === "error") {
-          downloadSingleFile(file.downloadUrl, file.original_file_name);
+          downloadSingleFile(downloadUrl, file.original_file_name);
         }
       } else {
-        downloadSingleFile(file.downloadUrl, file.original_file_name);
+        downloadSingleFile(downloadUrl, file.original_file_name);
       }
     } finally {
       setSavingId(null);
@@ -265,18 +335,51 @@ export default function GalleryView() {
     setFallbackFiles([]);
     setDownloadResult(null);
 
+    // Pre-fetch original signed URLs for selected items whose downloadUrl="" (thumbnail-only).
+    // We write directly into fetchedUrlsRef so we can read the results synchronously below.
+    const missingUrl = toDownload.filter(
+      (f) => !f.downloadUrl && !fetchedUrlsRef.current.has(f.id)
+    );
+    if (missingUrl.length > 0) {
+      await Promise.all(
+        missingUrl.map(async (f) => {
+          try {
+            const res = await fetch(`/api/gallery/file/${f.id}`);
+            if (res.ok) {
+              const data = await res.json() as { url?: string };
+              if (data.url) fetchedUrlsRef.current.set(f.id, data.url);
+            }
+          } catch { /* ignore — these files will appear in the failed list */ }
+        })
+      );
+    }
+
+    // Build resolved list: substitute fetched URLs where downloadUrl was empty.
+    const resolved = toDownload
+      .map((f) => ({
+        ...f,
+        url:         f.url         || fetchedUrlsRef.current.get(f.id) || "",
+        downloadUrl: f.downloadUrl || fetchedUrlsRef.current.get(f.id) || "",
+      }))
+      .filter((f) => !!f.downloadUrl); // skip files whose URL we couldn't obtain
+
+    if (resolved.length === 0) {
+      setDownloadState("idle");
+      return;
+    }
+
     await new Promise<void>((r) => setTimeout(r, 400));
 
     setDownloadState("downloading");
-    setDownloadProgress({ current: 0, total: toDownload.length });
+    setDownloadProgress({ current: 0, total: resolved.length });
 
     const failed = await downloadFilesSequentially(
-      toDownload,
+      resolved,
       600,
       (current, total) => setDownloadProgress({ current, total })
     );
 
-    const successCount = toDownload.length - failed.length;
+    const successCount = resolved.length - failed.length;
     setDownloadResult({ success: successCount, failed: failed.length });
     setDownloadState("done");
 
@@ -545,12 +648,20 @@ export default function GalleryView() {
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
       {currentFile && lightboxIndex !== null && (
         <div
-          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+          className="fixed inset-0 z-50 bg-black/95"
           onTouchStart={handleLightboxTouchStart}
           onTouchEnd={handleLightboxTouchEnd}
+          onClick={closeLightbox}
         >
-          {/* ── Top bar: counter + close ─────────────────────────────────────── */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 py-3">
+          {/* ── Top bar: counter + close ──────────────────────────────────────────
+              Absolutely positioned so a tall portrait image can never push it off
+              screen. z-20 keeps it above the media layer. The gradient prevents the
+              bar from blending into bright images. */}
+          <div
+            className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between
+                       px-4 py-3 bg-gradient-to-b from-black/60 to-transparent"
+            onClick={(e) => e.stopPropagation()}
+          >
             <span className="font-sans text-white/40 text-xs tabular-nums">
               {lightboxIndex + 1} / {files.length}
             </span>
@@ -564,11 +675,10 @@ export default function GalleryView() {
             </button>
           </div>
 
-          {/* ── Media area: fills remaining height ───────────────────────────── */}
-          <div
-            className="flex-1 min-h-0 relative flex items-center justify-center"
-            onClick={closeLightbox}
-          >
+          {/* ── Media area ────────────────────────────────────────────────────────
+              pt-14 / pb-20 keeps the media content within the safe zone between the
+              two bars. Arrows and media are positioned absolutely inside this layer. */}
+          <div className="absolute inset-0 flex items-center justify-center pt-14 pb-20">
             {/* Prev — loops around */}
             {files.length > 1 && (
               <button
@@ -593,7 +703,7 @@ export default function GalleryView() {
               </button>
             )}
 
-            {/* Media — constrained to the flex-1 container */}
+            {/* Media — constrained by the padded container */}
             <div
               className="h-full w-full flex items-center justify-center px-14 md:px-20"
               onClick={(e) => e.stopPropagation()}
@@ -613,11 +723,16 @@ export default function GalleryView() {
                   className="max-h-full max-w-full rounded-xl"
                   onError={() => setLightboxMediaError(true)}
                 />
+              ) : fetchingOriginalUrl ? (
+                /* Fetching original URL for this image (thumbnail-only grid entry) */
+                <div className="flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-white/40 animate-spin" strokeWidth={1.5} />
+                </div>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={currentFile.id}
-                  src={currentFile.url}
+                  src={lightboxOriginalUrl || currentFile.url}
                   alt={currentFile.original_file_name}
                   className="max-h-full max-w-full rounded-xl object-contain"
                   onError={() => setLightboxMediaError(true)}
@@ -626,8 +741,17 @@ export default function GalleryView() {
             </div>
           </div>
 
-          {/* ── Bottom bar: uploader + save — always visible ──────────────────── */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 gap-3">
+          {/* ── Bottom bar: uploader + save ───────────────────────────────────────
+              Absolutely positioned so it is ALWAYS visible regardless of image
+              aspect ratio. Safe-area padding ensures it clears the home indicator
+              on iPhone. z-20 keeps it above the media layer. */}
+          <div
+            className="absolute bottom-0 left-0 right-0 z-20 flex items-center
+                       justify-between px-4 pt-3 gap-3 bg-gradient-to-t from-black/60
+                       to-transparent"
+            style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <span className="flex items-center gap-1.5 min-w-0">
               {currentFile.guest_name && (
                 <>
@@ -747,7 +871,7 @@ function GalleryTile({
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={file.url}
+          src={file.thumbnailUrl ?? file.url}
           alt={file.original_file_name}
           className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
           loading="lazy"
