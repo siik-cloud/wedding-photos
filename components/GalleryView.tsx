@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Download,
+  Share2,
   X,
   ChevronLeft,
   ChevronRight,
@@ -16,6 +17,7 @@ import {
 import type { UploadWithUrl } from "@/types";
 import {
   isMobileDevice,
+  shareFileFromUrl,
   downloadSingleFile,
   downloadFilesSequentially,
   type DownloadState,
@@ -107,13 +109,23 @@ export default function GalleryView() {
     };
     window.addEventListener("keydown", handler);
 
-    // Prevent background scroll while lightbox is open
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    // Prevent background scroll while lightbox is open.
+    // `overflow:hidden` alone does NOT work on iOS Safari — the page scrolls anyway.
+    // The reliable fix: freeze the body at the current scroll position using
+    // `position:fixed` + a negative `top` offset, then restore on cleanup.
+    const scrollY = window.scrollY;
+    document.body.style.position   = "fixed";
+    document.body.style.top        = `-${scrollY}px`;
+    document.body.style.width      = "100%";
+    document.body.style.overflowY  = "scroll"; // keeps scrollbar width so layout doesn't jump
 
     return () => {
       window.removeEventListener("keydown", handler);
-      document.body.style.overflow = prevOverflow;
+      document.body.style.position  = "";
+      document.body.style.top       = "";
+      document.body.style.width     = "";
+      document.body.style.overflowY = "";
+      window.scrollTo(0, scrollY);  // restore exact scroll position
     };
   }, [lightboxIndex, goPrev, goNext]);
 
@@ -157,6 +169,33 @@ export default function GalleryView() {
       downloadSingleFile(file.downloadUrl, file.original_file_name);
     }
   }, [isMobile]);
+
+  // ── Lightbox save ────────────────────────────────────────────────────────
+  // Called directly from the save button — no modal layer.
+  // On devices with Web Share API (iOS 15+, Android Chrome) we invoke the share
+  // sheet with the actual File so the user can save to Photos / Drive / etc.
+  // If the API is unavailable or fails, we fall back to a blob download.
+
+  const handleLightboxSave = useCallback(async (file: UploadWithUrl) => {
+    const hasShare =
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function";
+
+    if (hasShare) {
+      const res = await shareFileFromUrl(
+        file.downloadUrl,
+        file.original_file_name,
+        file.mime_type
+      );
+      // "cancelled" means the user dismissed the share sheet — nothing more to do.
+      // "not-supported" / "error" → fall through to blob download.
+      if (res === "not-supported" || res === "error") {
+        downloadSingleFile(file.downloadUrl, file.original_file_name);
+      }
+    } else {
+      downloadSingleFile(file.downloadUrl, file.original_file_name);
+    }
+  }, []);
 
   // ── Swipe handlers ───────────────────────────────────────────────────────
   // Place onTouchStart / onTouchEnd on the lightbox overlay.
@@ -457,105 +496,111 @@ export default function GalleryView() {
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
       {currentFile && lightboxIndex !== null && (
         <div
-          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
-          onClick={closeLightbox}
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
           onTouchStart={handleLightboxTouchStart}
           onTouchEnd={handleLightboxTouchEnd}
         >
-          {/* Close */}
-          <button
-            className="absolute top-4 right-4 z-10 text-white/70 hover:text-white
-                       bg-black/30 rounded-full p-2.5 transition-colors"
-            onClick={closeLightbox}
-            aria-label="Zavrieť"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          {/* Prev — always visible when there are multiple files (loops around) */}
-          {files.length > 1 && (
+          {/* ── Top bar: counter + close ─────────────────────────────────────── */}
+          <div className="flex-shrink-0 flex items-center justify-between px-4 py-3">
+            <span className="font-sans text-white/40 text-xs tabular-nums">
+              {lightboxIndex + 1} / {files.length}
+            </span>
             <button
-              className="absolute left-2 sm:left-3 z-10 text-white/70 hover:text-white
-                         bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
-              onClick={(e) => { e.stopPropagation(); goPrev(); }}
-              aria-label="Predchádzajúca"
+              className="text-white/70 hover:text-white bg-black/30 rounded-full p-2.5
+                         transition-colors"
+              onClick={closeLightbox}
+              aria-label="Zavrieť"
             >
-              <ChevronLeft className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
-          )}
+          </div>
 
-          {/* Next — always visible when there are multiple files (loops around) */}
-          {files.length > 1 && (
-            <button
-              className="absolute right-2 sm:right-3 z-10 text-white/70 hover:text-white
-                         bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
-              onClick={(e) => { e.stopPropagation(); goNext(); }}
-              aria-label="Nasledujúca"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          )}
-
-          {/* Media */}
+          {/* ── Media area: fills remaining height ───────────────────────────── */}
           <div
-            className="max-w-5xl w-full mx-4 md:mx-16"
-            onClick={(e) => e.stopPropagation()}
+            className="flex-1 min-h-0 relative flex items-center justify-center"
+            onClick={closeLightbox}
           >
-            {currentFile.file_type === "video" ? (
-              <video
-                key={currentFile.id}
-                src={currentFile.url}
-                controls
-                playsInline
-                className="max-h-[80vh] max-w-full mx-auto rounded-xl"
-              />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={currentFile.id}
-                src={currentFile.url}
-                alt={currentFile.original_file_name}
-                className="max-h-[80vh] max-w-full mx-auto rounded-xl object-contain"
-              />
+            {/* Prev — loops around */}
+            {files.length > 1 && (
+              <button
+                className="absolute left-2 sm:left-3 z-10 text-white/70 hover:text-white
+                           bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
+                onClick={(e) => { e.stopPropagation(); goPrev(); }}
+                aria-label="Predchádzajúca"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
             )}
 
-            {/* Caption + download */}
-            <div className="flex items-center justify-between mt-3 px-1 gap-3">
-              <span className="text-white/60 flex items-center gap-1.5 min-w-0 text-sm">
-                {currentFile.guest_name && (
-                  <>
-                    <User className="w-3.5 h-3.5 text-white/40 flex-shrink-0" strokeWidth={1.5} />
-                    <span className="font-sans text-white/80 truncate">
-                      {currentFile.guest_name}
-                    </span>
-                    <span className="text-white/30 flex-shrink-0 mx-0.5">·</span>
-                  </>
-                )}
-                <span className="font-sans text-xs flex-shrink-0">
-                  {new Date(currentFile.created_at).toLocaleDateString("sk-SK")}
-                </span>
-              </span>
-
+            {/* Next — loops around */}
+            {files.length > 1 && (
               <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleSingleDownload(currentFile);
-                }}
-                className="flex items-center gap-1.5 font-sans text-sm text-white/80
-                           hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5
-                           rounded-lg transition-colors flex-shrink-0"
+                className="absolute right-2 sm:right-3 z-10 text-white/70 hover:text-white
+                           bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
+                onClick={(e) => { e.stopPropagation(); goNext(); }}
+                aria-label="Nasledujúca"
               >
-                <Download className="w-4 h-4" strokeWidth={1.5} />
-                {isMobile ? "Uložiť" : "Stiahnuť"}
+                <ChevronRight className="w-6 h-6" />
               </button>
+            )}
+
+            {/* Media — constrained to the flex-1 container */}
+            <div
+              className="h-full w-full flex items-center justify-center px-14 md:px-20"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {currentFile.file_type === "video" ? (
+                <video
+                  key={currentFile.id}
+                  src={currentFile.url}
+                  controls
+                  playsInline
+                  className="max-h-full max-w-full rounded-xl"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={currentFile.id}
+                  src={currentFile.url}
+                  alt={currentFile.original_file_name}
+                  className="max-h-full max-w-full rounded-xl object-contain"
+                />
+              )}
             </div>
           </div>
 
-          {/* Counter */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2
-                          font-sans text-white/40 text-xs">
-            {lightboxIndex + 1} / {files.length}
+          {/* ── Bottom bar: uploader + save — always visible ──────────────────── */}
+          <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 gap-3">
+            <span className="flex items-center gap-1.5 min-w-0">
+              {currentFile.guest_name && (
+                <>
+                  <User className="w-3.5 h-3.5 text-white/40 flex-shrink-0" strokeWidth={1.5} />
+                  <span className="font-sans text-sm text-white/80 truncate">
+                    {currentFile.guest_name}
+                  </span>
+                  <span className="text-white/30 flex-shrink-0 mx-0.5">·</span>
+                </>
+              )}
+              <span className="font-sans text-xs text-white/40 flex-shrink-0">
+                {new Date(currentFile.created_at).toLocaleDateString("sk-SK")}
+              </span>
+            </span>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleLightboxSave(currentFile);
+              }}
+              className="flex items-center gap-1.5 font-sans text-sm text-white/80
+                         hover:text-white bg-white/10 hover:bg-white/20 px-3 py-2
+                         rounded-xl transition-colors flex-shrink-0"
+            >
+              {isMobile
+                ? <Share2  className="w-4 h-4" strokeWidth={1.5} />
+                : <Download className="w-4 h-4" strokeWidth={1.5} />}
+              {isMobile ? "Uložiť" : "Stiahnuť"}
+            </button>
           </div>
         </div>
       )}
@@ -596,9 +641,21 @@ function GalleryTile({
       onClick={selecting ? onToggle : onClick}
     >
       {file.file_type === "video" ? (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-stone-800 gap-2">
-          <Play className="w-8 h-8 text-white/70" strokeWidth={1.5} />
-          <span className="font-sans text-xs text-white/40">Video</span>
+        /* preload="metadata" loads only the first keyframe — no full download needed */
+        <div className="w-full h-full relative bg-stone-900 overflow-hidden">
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video
+            src={file.url}
+            preload="metadata"
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="bg-black/50 rounded-full p-2.5">
+              <Play className="w-5 h-5 text-white" strokeWidth={1.5} fill="white" />
+            </div>
+          </div>
         </div>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
