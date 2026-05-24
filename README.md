@@ -1,149 +1,181 @@
 # 📷 Fotky zo svadby Katky a Šimona
 
-Wedding photo & video sharing app — mobile-first, simple enough for grandparents.
+Mobile-first wedding photo & video sharing app — simple enough for grandparents.
 
 **Stack:** Next.js 15 · TypeScript · Tailwind CSS · Supabase · Vercel
 
 ---
 
-## ✨ Features
+## ✨ What the app does
 
-| Feature | Details |
-|---------|---------|
-| **Upload** | No account, optional name, multiple files, direct-to-Supabase (no Vercel payload limits) |
-| **Image compression** | Client-side JPEG resize/re-encode before upload (max 2500 px, quality 0.82) |
-| **Per-file progress** | XHR progress events, status labels: Čaká / Pripravujem / % / Nahraté / Nepodarilo sa nahrať |
-| **Retry** | Individual file retry; other files are not affected |
-| **Double-tap guard** | `uploadingRef` prevents duplicate submissions |
-| **Gallery** | Toggleable public gallery at `/gallery`; locked state when disabled |
-| **Admin** | Dashboard with stats, gallery toggle, file management, test cleanup |
-| **Test cleanup** | Safely deletes only files marked `is_test = true` OR uploaded before `WEDDING_START_TIMESTAMP` |
-| **Security** | Server-side validation, service role key never in browser, HMAC-signed admin session |
+| Feature | Detail |
+|---------|--------|
+| **Guest upload** | No account needed. Optional name. Up to 30 files at once. |
+| **Progress per file** | XHR progress bar, status labels in Slovak. |
+| **Image compression** | Client-side JPEG resize before upload (max 2500 px, quality 0.82). |
+| **Video thumbnails** | Thumbnail JPEG generated client-side and stored separately; shown in gallery grid on all browsers including iOS Safari. |
+| **Retry** | Each file can be retried individually without affecting others. |
+| **Double-submit guard** | Prevents duplicate uploads when user taps the button twice. |
+| **Gallery** | Public gallery at `/gallery`. OFF by default; admin turns it ON after the wedding. |
+| **Lightbox** | Full-screen image/video viewer with swipe navigation and download/share. |
+| **Pagination** | Gallery and admin load 40 files at a time — "Načítať ďalšie" button for more. |
+| **Admin** | `/admin` — stats, file list, gallery toggle, soft delete with 7-day trash, bulk operations. |
+| **Trash + cron** | Deleted files move to trash; Vercel Cron purges them after 7 days. |
+| **Test cleanup** | Safely bulk-deletes only test uploads (uploaded before `WEDDING_START_TIMESTAMP`). |
+| **Security** | Files go browser → Supabase directly via server-signed URLs. Service key never in browser. Admin session is HMAC-SHA256 signed cookie. |
 
 ---
 
-## 🗂 Project Structure
+## 🗂 Project structure
 
 ```
 wedding-photos/
 ├── app/
-│   ├── page.tsx                      # Upload page + gallery card
-│   ├── gallery/page.tsx              # Public gallery / locked state
-│   ├── admin/page.tsx                # Admin panel
+│   ├── page.tsx                         # Main page (hero + upload form + gallery link)
+│   ├── gallery/page.tsx                 # Public gallery / locked state
+│   ├── admin/page.tsx                   # Admin dashboard
 │   └── api/
-│       ├── upload/init/route.ts      # Validate + signed upload URL
-│       ├── upload/confirm/route.ts   # Record in database
-│       ├── gallery/route.ts          # Public gallery API
-│       └── admin/
-│           ├── login/route.ts
-│           ├── logout/route.ts
-│           ├── files/route.ts
-│           ├── files/[id]/route.ts
-│           ├── settings/route.ts
-│           └── cleanup/route.ts      # Test cleanup (GET preview / DELETE execute)
+│       ├── upload/
+│       │   ├── init/route.ts            # Validate + issue signed PUT URL
+│       │   ├── confirm/route.ts         # Record upload in database
+│       │   └── thumbnail/route.ts       # Issue signed PUT URL for thumbnail
+│       ├── gallery/route.ts             # Paginated public gallery API
+│       ├── admin/
+│       │   ├── login/route.ts
+│       │   ├── logout/route.ts
+│       │   ├── files/route.ts           # Paginated, filtered file list + stats
+│       │   ├── files/[id]/route.ts      # Soft-delete single file
+│       │   ├── files/[id]/restore/      # Restore from trash
+│       │   ├── files/bulk/route.ts      # Bulk soft-delete
+│       │   ├── settings/route.ts        # Gallery toggle (GET/PUT)
+│       │   ├── trash/route.ts           # List trash
+│       │   └── cleanup/route.ts         # Test-upload cleanup (GET preview / DELETE)
+│       └── cron/
+│           └── purge-trash/route.ts     # Called by Vercel Cron daily at 03:00 UTC
 ├── components/
-│   ├── UploadForm.tsx                # Upload UI with compression + progress
-│   ├── GalleryView.tsx               # Photo/video grid + lightbox
-│   ├── AdminPanel.tsx                # Dashboard + cleanup section
-│   └── AdminLogin.tsx
+│   ├── UploadForm.tsx                   # Full upload UI
+│   ├── GalleryView.tsx                  # Grid + lightbox + selection + bulk download
+│   ├── AdminPanel.tsx                   # Admin dashboard
+│   ├── AdminLogin.tsx
+│   ├── MobileSaveModal.tsx              # Share sheet on mobile (admin)
+│   ├── WeddingInfo.tsx
+│   └── MobileNav.tsx
 ├── lib/
-│   ├── imageCompression.ts           # Client-side JPEG compression (canvas)
-│   ├── supabase-client.ts            # Browser client (anon key)
-│   ├── supabase-server.ts            # Server client (service role)
-│   ├── auth.ts                       # HMAC-signed admin session cookie
-│   └── utils.ts                      # createId() — safe UUID with fallback
+│   ├── auth.ts                          # HMAC-SHA256 signed admin cookie
+│   ├── downloadUtils.ts                 # Blob-download, Web Share API helpers
+│   ├── imageCompression.ts              # Client-side JPEG resize (Canvas API)
+│   ├── videoThumbnail.ts                # Client-side video frame capture (Canvas API)
+│   ├── supabase/
+│   │   ├── browser-client.ts            # Anon/publishable key — browser only
+│   │   └── server-client.ts             # Service/secret key — server only
+│   └── utils.ts                         # createId() — UUID with HTTP fallback
 ├── types/index.ts
-└── supabase/
-    ├── config.toml                       # Supabase CLI config
-    └── migrations/
-        ├── 20260523000000_create_uploads_table.sql
-        ├── 20260523000001_create_settings_table.sql
-        └── 20260523000002_add_is_test_to_uploads.sql
+├── supabase/
+│   ├── config.toml
+│   └── migrations/
+│       ├── 20260523000000_create_uploads_table.sql
+│       ├── 20260523000001_create_settings_table.sql
+│       ├── 20260523000002_add_is_test_to_uploads.sql
+│       └── 20260524000000_add_thumbnail_path_to_uploads.sql
+└── vercel.json                          # Vercel Cron schedule
 ```
+
+---
+
+## 🌐 Routes
+
+| URL | Who | Description |
+|-----|-----|-------------|
+| `/` | Everyone | Upload page |
+| `/gallery` | Everyone | Public gallery (locked when disabled) |
+| `/admin` | Admin | Dashboard |
 
 ---
 
 ## 🚀 Setup — Step by Step
 
-### Step 1 — Create a Supabase Project
+### Step 1 — Create a Supabase project
 
 1. Sign in at [supabase.com](https://supabase.com) → **New project**
-2. Name: `wedding-photos` | Region: `eu-central-1` (Frankfurt, closest to Slovakia)
-3. Save the database password somewhere safe
-4. Wait ~2 minutes for provisioning
+2. **Name:** `wedding-photos`
+3. **Region:** `eu-central-1` (Frankfurt — closest to Slovakia)
+4. Save the database password somewhere safe
+5. Wait ~2 minutes for provisioning
 
 ---
 
-### Step 2 — Apply Database Migrations
-
-The schema is managed through Supabase migrations — no manual SQL in the dashboard.
+### Step 2 — Apply database migrations
 
 **Install the Supabase CLI** (once per machine):
 
 ```bash
+# npm (any OS)
 npm install -g supabase
-# or with Homebrew on macOS:
+
+# Homebrew (macOS/Linux)
 brew install supabase/tap/supabase
 ```
 
 **Link to your remote project:**
 
 ```bash
-# Your project ref is the subdomain of your Supabase URL.
-# e.g. https://mngtodrqgogdulnbabgt.supabase.co → ref = mngtodrqgogdulnbabgt
+# Your project ref = the subdomain of your Supabase URL.
+# Example: https://abcdefghijkl.supabase.co → ref = abcdefghijkl
 supabase link --project-ref <your-project-ref>
 ```
 
-This saves the remote connection into `.supabase/`. You only need to do this once per machine.
-
-**Push migrations to the remote database:**
+**Push all migrations:**
 
 ```bash
 supabase db push
 ```
 
-This applies any unapplied migrations in `supabase/migrations/` in order. Supabase tracks which migrations have already run, so it is safe to run again — it is idempotent.
-
-You should see output like:
+Expected output:
 
 ```
 Applying migration 20260523000000_create_uploads_table.sql...
 Applying migration 20260523000001_create_settings_table.sql...
 Applying migration 20260523000002_add_is_test_to_uploads.sql...
+Applying migration 20260524000000_add_thumbnail_path_to_uploads.sql...
 ```
 
-> **No manual SQL required.** Do not run anything in the Supabase SQL editor.
+`supabase db push` is idempotent — safe to run multiple times. Already-applied migrations are skipped.
+
+> **Do not run any SQL manually in the Supabase dashboard.**
 
 ---
 
-### Step 3 — Create Storage Bucket
+### Step 3 — Create the storage bucket
 
 1. Supabase dashboard → **Storage** → **New bucket**
-2. Name: `wedding-uploads` ← exact, lowercase
-3. Public bucket: **OFF** (private)
+2. **Name:** `wedding-uploads` ← must be exactly this, lowercase
+3. **Public bucket:** OFF (keep it private)
 4. Click **Save**
 
-No storage policies needed — the server uses the service role key which bypasses RLS.
+No bucket policies needed — the server uses the service/secret key which bypasses RLS.
 
 ---
 
-### Step 4 — Get API Keys
+### Step 4 — Get your API keys
 
 Supabase dashboard → **Settings** → **API**:
 
-| Key | Env variable |
-|-----|-------------|
+| Dashboard label | Env variable |
+|-----------------|-------------|
 | Project URL | `NEXT_PUBLIC_SUPABASE_URL` |
-| Publishable key | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
-| Secret key | `SUPABASE_SECRET_KEY` |
+| **Publishable** API key (or "anon" in older dashboards) | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
+| **Secret** API key (or "service_role" in older dashboards) | `SUPABASE_SECRET_KEY` |
 
-> ⚠️ Never commit the secret key. It goes only in server-side env vars and is never sent to the browser.
+> Supabase renamed "anon" → "publishable" and "service_role" → "secret" in their dashboard.
+> The keys themselves are identical — just copy whichever your dashboard shows.
+
+> ⚠️ Never commit `SUPABASE_SECRET_KEY`. It has full database access.
 
 ---
 
-### Step 5 — Configure Environment Variables
+### Step 5 — Configure environment variables
 
-Copy the example file and fill in your values:
+Copy the example and fill in your values:
 
 ```bash
 cp .env.local.example .env.local
@@ -151,312 +183,322 @@ cp .env.local.example .env.local
 
 ```env
 # .env.local
+
+# ── Supabase ──────────────────────────────────────────────────────────────────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
 
-# Publishable key — safe for the browser (replaces legacy NEXT_PUBLIC_SUPABASE_ANON_KEY)
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=eyJ...
+# Publishable/anon key — safe for the browser
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-# Secret key — server-side only, never exposed to the browser (replaces legacy SUPABASE_SERVICE_ROLE_KEY)
-SUPABASE_SECRET_KEY=eyJ...
+# Secret/service_role key — SERVER ONLY, never sent to the browser
+SUPABASE_SECRET_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-# Admin panel password — choose something strong
-ADMIN_PASSWORD=your-strong-password
+# ── Admin ─────────────────────────────────────────────────────────────────────
+# Password for the /admin dashboard
+ADMIN_PASSWORD=choose-something-strong
 
-# Optional: timestamp of when the actual wedding starts.
-# Files uploaded BEFORE this date are treated as test uploads
-# and can be safely deleted via the admin "Vymazať test uploady" button.
-# Format: ISO 8601 (any timezone)
-# Example: 2026-06-06T10:00:00+02:00
+# ── Wedding config ────────────────────────────────────────────────────────────
+# ISO 8601 timestamp when the wedding starts.
+# Uploads BEFORE this = test uploads that can be bulk-deleted safely.
 WEDDING_START_TIMESTAMP=2026-06-06T10:00:00+02:00
 
-# Cron secret — protects the /api/cron/purge-trash endpoint.
+# ── Cron ─────────────────────────────────────────────────────────────────────
+# Protects /api/cron/purge-trash — Vercel sends this as Authorization: Bearer <secret>
 # Generate: openssl rand -hex 32
 CRON_SECRET=replace-with-a-strong-random-secret
 ```
 
 ---
 
-### Step 6 — Local Development
+### Step 6 — Local development
 
 ```bash
-cd wedding-photos
 npm install
 npm run dev
 # Opens at http://localhost:3000
 ```
 
----
-
-### Step 7 — Test on a Phone Over Local Network (HTTP)
-
-Since phones on the same Wi-Fi can reach your computer, you can test on real hardware without deploying:
+**Test on a real phone over Wi-Fi** (same network as your computer):
 
 ```bash
-# Find your machine's local IP
-# Windows:
-ipconfig
-# Look for "IPv4 Address", e.g. 192.168.1.42
+# Find your local IP first:
+# Windows: ipconfig → look for IPv4 Address (e.g. 192.168.1.42)
+# macOS:   ifconfig | grep "inet "
 
-# macOS/Linux:
-ifconfig | grep "inet "
-```
-
-Then start Next.js bound to all interfaces:
-
-```bash
+# Start Next.js on all interfaces:
 npm run dev -- --hostname 0.0.0.0
-# or add to package.json scripts: "dev": "next dev --hostname 0.0.0.0"
+
+# Open on phone: http://192.168.1.42:3000
 ```
 
-Open **`http://192.168.1.42:3000`** on your phone (same Wi-Fi).
-
-> **Note:** `http://` (not HTTPS) means `crypto.randomUUID()` may not be available.
-> The app uses `createId()` in `lib/utils.ts` which has a safe fallback — this is handled.
+> Note: On `http://` (non-HTTPS) `crypto.randomUUID()` is unavailable.
+> The app's `createId()` in `lib/utils.ts` has a base-36 fallback — this is handled.
 
 ---
 
-### Step 8 — Deploy to Vercel
+### Step 7 — Deploy to Vercel
 
-1. Push to GitHub:
-   ```bash
-   git init && git add . && git commit -m "Initial commit"
-   git remote add origin https://github.com/YOUR_USER/wedding-photos.git
-   git push -u origin main
-   ```
+**Push to GitHub:**
 
-2. [vercel.com](https://vercel.com) → **Add New Project** → Import your repo
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin https://github.com/YOUR_USER/wedding-photos.git
+git push -u origin main
+```
 
-3. Under **Environment Variables**, add all variables:
-   ```
-   NEXT_PUBLIC_SUPABASE_URL
-   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-   SUPABASE_SECRET_KEY
-   ADMIN_PASSWORD
-   WEDDING_START_TIMESTAMP   ← optional but recommended
-   CRON_SECRET               ← required for trash auto-purge
-   ```
+**Import to Vercel:**
 
-4. Click **Deploy** (~2 min). You'll get a URL like `https://wedding-photos-abc.vercel.app`
+1. [vercel.com](https://vercel.com) → **Add New Project** → Import your repo
+2. Framework: **Next.js** (auto-detected)
+3. Under **Environment Variables**, add all six:
 
----
+   | Variable | Required |
+   |----------|----------|
+   | `NEXT_PUBLIC_SUPABASE_URL` | ✅ |
+   | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ |
+   | `SUPABASE_SECRET_KEY` | ✅ |
+   | `ADMIN_PASSWORD` | ✅ |
+   | `WEDDING_START_TIMESTAMP` | recommended |
+   | `CRON_SECRET` | required for trash auto-purge |
 
-### Step 9 — Generate a QR Code
-
-1. Take your Vercel URL (or custom domain)
-2. Generate a QR at [goqr.me](https://goqr.me) or [qr-code-generator.com](https://www.qr-code-generator.com)
-3. Download as PNG (300+ DPI for print)
-4. Print on table cards, programs, a large sign at the venue
+4. Click **Deploy** (~2 min). You get a URL like `https://wedding-photos-abc.vercel.app`.
 
 ---
 
-### Step 10 — Production Checklist
+### Step 8 — Generate a QR code
 
-- [ ] Schema SQL was run successfully in Supabase
-- [ ] `wedding-uploads` bucket exists and is **private**
-- [ ] All 5 env vars set in Vercel
-- [ ] App deployed and accessible at the Vercel URL
-- [ ] Admin login works at `/admin`
+1. Copy your Vercel URL (e.g. `https://wedding-photos-abc.vercel.app`)
+2. Generate a QR code at [goqr.me](https://goqr.me) or [qr-code-generator.com](https://www.qr-code-generator.com)
+3. Download as PNG — use 300+ DPI / 1000+ px for print quality
+4. Print on table cards, ceremony programs, or a large sign at the venue
+
+---
+
+### Step 9 — Pre-wedding checklist
+
+- [ ] `supabase db push` ran without errors — all 4 migrations applied
+- [ ] `wedding-uploads` bucket exists in Supabase Storage, set to **private**
+- [ ] All 6 env vars set in Vercel
+- [ ] App is live at the Vercel URL
+- [ ] Admin login works at `/admin` with your `ADMIN_PASSWORD`
 - [ ] Gallery shows locked state at `/gallery`
 - [ ] Upload 1 test photo → appears in admin panel
-- [ ] Gallery toggle: turn ON → photo appears at `/gallery`
-- [ ] Gallery toggle: turn OFF → gallery shows locked state
-- [ ] Delete test photo from admin
-- [ ] Run cleanup: "Vymazať test uploady" removes test files
-- [ ] QR code prints correctly and links to the right URL
+- [ ] Toggle gallery ON → photo visible at `/gallery`
+- [ ] Toggle gallery OFF → gallery shows locked state again
+- [ ] Delete the test photo from admin → disappears
+- [ ] Run "Vymazať test uploady" → no real photos deleted
+- [ ] QR code scans correctly on iPhone and Android
+- [ ] Upload test on slow mobile data (use browser DevTools throttle)
 
 ---
 
-## 👤 Admin Panel
+## 👤 Admin panel
 
 URL: `https://your-app.vercel.app/admin`
 
-**Login:** enter `ADMIN_PASSWORD` from your env vars.
+Login: the value of `ADMIN_PASSWORD`.
 
-### Features:
-- **Stats** — total files, photo count, video count, total storage size
-- **Gallery toggle** — enable/disable public gallery instantly
-- **File list** — view all uploads with guest name, date, size; download or delete each file
-- **Test cleanup** — preview + delete files uploaded before `WEDDING_START_TIMESTAMP`
+### What you can do
 
-### Test Cleanup Logic
+| Action | Where |
+|--------|-------|
+| View all uploads (with uploader name, date, size) | File list |
+| Search by name or filename | Filter bar |
+| Filter by photos / videos | Type filter |
+| Sort by newest / oldest / largest | Sort selector |
+| Download a file | Download button per row |
+| Soft-delete a file (moves to 7-day trash) | Trash button per row |
+| Restore from trash | Kôš tab → Obnoviť |
+| Bulk delete selected | BulkActionBar |
+| Toggle public gallery ON/OFF | Gallery toggle card |
+| See total files / photos / videos / storage used | Stats cards |
+| Delete all test uploads | "Vymazať test uploady" section |
 
-The "Vymazať test uploady" button is safe — it only deletes:
+### Test cleanup logic
 
-1. Files where `is_test = true` in the database, **OR**
-2. Files uploaded before `WEDDING_START_TIMESTAMP` (if the env var is set)
+"Vymazať test uploady" only deletes:
+1. Files where `is_test = true` in the database, **or**
+2. Files uploaded **before** `WEDDING_START_TIMESTAMP` (if that env var is set)
 
-It **never** deletes files uploaded after the wedding start time. Real wedding photos are always safe.
-
----
-
-## 🖼️ Image Compression
-
-Before uploading, the app compresses photos client-side using the browser's Canvas API:
-
-| Setting | Value |
-|---------|-------|
-| Max dimension | 2500 px (longest side) |
-| Output format | JPEG |
-| Quality | 0.82 |
-| Min size to compress | 400 KB (smaller files skipped) |
-| HEIC/HEIF | Skipped (uploaded as-is) |
-| GIF | Skipped (would destroy animation) |
-| Videos | Never compressed |
-
-If compression produces a larger file than the original, the original is used instead. Compression errors always fall back to the original — uploads always continue.
+Real wedding photos (uploaded after the wedding started) are never touched.
 
 ---
 
-## ⬇️ Downloading All Files
+## ⬇️ Downloading all files
 
-Vercel serverless functions time out for large ZIPs. Recommended alternatives:
+Vercel serverless functions time out on large ZIP archives. Use one of these instead:
 
-### Option A — Supabase Storage Dashboard *(easiest)*
-Supabase project → **Storage** → `wedding-uploads` → browse by date → download
+**Option A — Supabase Storage dashboard** *(easiest, no CLI needed)*
 
-### Option B — Supabase CLI
+Supabase project → Storage → `wedding-uploads` → browse folders → select all → Download
+
+**Option B — Supabase CLI** *(fastest for hundreds of files)*
+
 ```bash
-npm install -g supabase
-supabase login
 supabase storage cp --recursive ss:///wedding-uploads ./svadobne-fotky
 ```
 
-### Option C — Admin Panel
-Download files one by one using the download button in the admin file list.
+**Option C — Admin panel**
+Download files individually with the download button in the file list. The admin "Bulk download" feature downloads selected files one by one.
+
+---
+
+## 🗂 Database schema
+
+### `uploads`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `file_name` | TEXT | Safe filename (UUID prefix) |
+| `original_file_name` | TEXT | Original name from the device |
+| `file_type` | TEXT | `image` / `video` / `other` |
+| `mime_type` | TEXT | e.g. `image/jpeg` |
+| `file_size` | BIGINT | Bytes |
+| `storage_path` | TEXT UNIQUE | Path in the bucket |
+| `guest_name` | TEXT NULL | Optional uploader name |
+| `created_at` | TIMESTAMPTZ | Default `NOW()` |
+| `deleted_at` | TIMESTAMPTZ NULL | Soft delete timestamp |
+| `is_test` | BOOLEAN | `true` = safe to bulk-delete |
+| `thumbnail_path` | TEXT NULL | Path to pre-generated video thumbnail JPEG |
+
+### `settings`
+
+| Key | Value | Default |
+|-----|-------|---------|
+| `public_gallery_enabled` | boolean (JSONB) | `false` |
+
+---
+
+## 📋 Environment variables reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Publishable/anon key — safe for browser |
+| `SUPABASE_SECRET_KEY` | ✅ | Secret/service_role key — server only |
+| `ADMIN_PASSWORD` | ✅ | Password for `/admin` |
+| `WEDDING_START_TIMESTAMP` | ☑️ | ISO 8601; uploads before this = test uploads |
+| `CRON_SECRET` | ☑️ | Bearer secret for `/api/cron/purge-trash` |
 
 ---
 
 ## 🔐 Security
 
-- Files upload **browser → Supabase directly** via server-issued signed URLs (service role key never in client bundle)
-- File type and size validated **server-side** in `/api/upload/init` (client validation is UX only)
-- Admin session = **stateless HMAC-SHA256 signed cookie**, 8-hour expiry, works on Vercel serverless
-- Storage bucket is **private** — signed URLs required, auto-expire after 2–4 hours
+- **Uploads go browser → Supabase directly** via short-lived signed PUT URLs generated server-side. The secret key is never in the browser bundle.
+- **File type and size are validated server-side** in `/api/upload/init`. Client-side checks are UX only.
+- **Admin session** = stateless HMAC-SHA256 signed cookie, 8-hour expiry. No database session table needed.
+- **Storage bucket is private** — all URLs are signed and expire (2 h gallery, 4 h admin).
+- **RLS is enabled** on both tables with no public policies — row-level safety net even if the publishable key is used directly.
 
 ---
 
-## 🌐 Routes
+## 🖼️ Image compression
 
-| URL | Description |
-|-----|-------------|
-| `/` | Guest upload page |
-| `/gallery` | Public gallery (when enabled) |
-| `/admin` | Admin dashboard |
+Before uploading, the browser compresses photos client-side using the Canvas API:
 
----
+| Setting | Value |
+|---------|-------|
+| Max dimension (longest side) | 2500 px |
+| Output format | JPEG |
+| Quality | 0.82 |
+| Minimum file size to compress | 400 KB (smaller files skip compression) |
+| HEIC / HEIF | Skipped (uploaded as-is — iOS original format) |
+| GIF | Skipped (compression would destroy animation) |
+| Videos | Never compressed |
 
-## 📋 Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Publishable key — safe for browser use |
-| `SUPABASE_SECRET_KEY` | ✅ | Secret key — server-side only, never in browser! |
-| `ADMIN_PASSWORD` | ✅ | Admin panel password |
-| `WEDDING_START_TIMESTAMP` | ☑️ | ISO date; files before this = test uploads |
-| `CRON_SECRET` | ☑️ | Protects `/api/cron/purge-trash` — required for trash auto-purge |
+If compression produces a file *larger* than the original, the original is used instead. Compression failures always fall back to the original — uploads never fail because of compression.
 
 ---
 
-## 🗃 Database Migrations Reference
+## 🎬 Video thumbnails
 
-All schema changes go through versioned migration files in `supabase/migrations/`.
-They are never applied manually in the Supabase dashboard.
+For each uploaded video, the browser:
 
-### Migration files
+1. Creates a local blob URL from the file (no CORS issues)
+2. Seeks a `<video>` element to 1 second (or 10% of duration)
+3. Draws the frame onto a Canvas
+4. Exports as JPEG (max 800 px, quality 0.82)
+5. Uploads the thumbnail to `thumbnails/YYYY/MM/<uuid>.jpg` in the same bucket
+6. Records `thumbnail_path` in the database
+
+Gallery and admin then use `<img src={thumbnailUrl}>` instead of a `<video>` element, which works reliably on iOS Safari.
+
+Fallback chain: pre-generated JPEG → `<video preload="metadata" #t=0.001>` → dark background with play icon.
+
+---
+
+## 🗃 Migrations reference
+
+Migrations live in `supabase/migrations/` and are applied with `supabase db push`.
 
 | File | What it does |
 |------|-------------|
 | `20260523000000_create_uploads_table.sql` | `uploads` table, indexes, RLS |
 | `20260523000001_create_settings_table.sql` | `settings` table, RLS, seeds `public_gallery_enabled = false` |
-| `20260523000002_add_is_test_to_uploads.sql` | `is_test` column + index on `uploads` |
+| `20260523000002_add_is_test_to_uploads.sql` | `is_test` column for test-upload cleanup |
+| `20260524000000_add_thumbnail_path_to_uploads.sql` | `thumbnail_path` column for video thumbnail storage |
 
-### Commands
-
-```bash
-# Apply all pending migrations to the remote project
-supabase db push
-
-# Create a new migration (auto-generates a timestamped file)
-supabase migration new <description>
-# Example:
-supabase migration new add_tags_to_uploads
-# → creates supabase/migrations/20260601120000_add_tags_to_uploads.sql
-# Edit that file, then run:
-supabase db push
-
-# Check which migrations have been applied on the remote
-supabase migration list
-
-# Pull current remote schema into a new migration (useful if you made changes in the dashboard)
-supabase db pull
-```
-
-### Adding a future schema change
-
-1. Run `supabase migration new <what_changed>`
-2. Write the SQL in the generated file (pure `ALTER TABLE`, `CREATE INDEX`, etc.)
-3. Run `supabase db push`
-4. Commit the new migration file to git
-
-Do **not** edit existing migration files after they have been applied to any environment.
-
-### Checking migration status
+**To add a future schema change:**
 
 ```bash
-supabase migration list
+# Create a timestamped migration file
+supabase migration new describe_what_changed
+
+# Edit the generated file, then push
+supabase db push
+
+# Commit it to git
+git add supabase/migrations/ && git commit -m "chore: add migration"
 ```
 
-Output shows which migrations are applied locally and remotely:
-
-```
-        LOCAL      │     REMOTE     │     TIME (UTC)
-  ─────────────────┼────────────────┼──────────────────────
-  20260523000000   │ 20260523000000 │ 2026-05-23 12:00:00
-  20260523000001   │ 20260523000001 │ 2026-05-23 12:00:01
-  20260523000002   │ 20260523000002 │ 2026-05-23 12:00:02
-```
+Never edit a migration file that has already been pushed to any environment.
 
 ---
 
-## ✅ Testing Checklist
+## ✅ Full testing checklist
 
-```
-UPLOAD
-[ ] Upload 1 photo from iPhone (HEIC or JPEG)
-[ ] Upload 1 photo from Android (JPEG or WebP)
-[ ] Upload multiple photos at once (5+)
-[ ] Upload 1 short video (MP4 / MOV)
-[ ] Try uploading a PDF → expect Slovak error message
-[ ] Try uploading a 30 MB image → expect "príliš veľký" error
-[ ] Tap upload button twice quickly → only one upload starts
-[ ] Close browser tab mid-upload → reopen and retry
+### Upload
+- [ ] Upload 1 photo from iPhone (HEIC)
+- [ ] Upload 1 photo from Android (JPEG or WebP)
+- [ ] Upload 5+ photos at once — progress shows per file
+- [ ] Upload 1 short video (MP4 or MOV)
+- [ ] Upload a video — thumbnail appears in gallery grid
+- [ ] Try uploading a PDF → expect Slovak error, no crash
+- [ ] Try uploading a 30 MB image → "príliš veľký" error
+- [ ] Tap upload button twice quickly → only 1 upload starts
+- [ ] Choose 35 files → error before upload starts (max 30)
 
-NETWORK
-[ ] Upload on good Wi-Fi
-[ ] Upload on slow mobile data (throttle in DevTools)
-[ ] Open app via local IP http://192.168.x.x:3000 on phone
-[ ] Upload via local IP on phone (tests createId() fallback)
+### Gallery
+- [ ] `/gallery` shows locked state before toggle
+- [ ] Admin: turn gallery ON → photos appear at `/gallery`
+- [ ] Admin: turn gallery OFF → locked state returns
+- [ ] Lightbox: swipe left/right between photos
+- [ ] Download a photo from the lightbox (desktop)
+- [ ] Share/save a photo from the lightbox (mobile)
+- [ ] Video plays in lightbox
+- [ ] Video thumbnail shows in grid (iPhone)
 
-GALLERY
-[ ] Gallery page shows locked state before toggle
-[ ] Admin: turn gallery ON → /gallery shows photos
-[ ] Admin: turn gallery OFF → /gallery shows locked state
-[ ] Download a photo from gallery
-[ ] Open gallery from QR code on phone
+### Admin
+- [ ] Login with correct password → success
+- [ ] Login with wrong password → error, no crash
+- [ ] File list shows all uploads with uploader name
+- [ ] Search works — filters to matching files
+- [ ] Type filter: only photos / only videos
+- [ ] Sort: oldest / largest
+- [ ] "Načítať ďalšie" loads next page without losing existing items
+- [ ] Delete 1 file → moves to trash, stats update
+- [ ] Kôš tab → restore file → reappears in active list
+- [ ] Bulk select + delete → modal → confirm → files gone
+- [ ] Stats cards show correct counts
+- [ ] "Vymazať test uploady" → preview shows correct count
+- [ ] Execute cleanup → only test files removed
 
-ADMIN
-[ ] Login with correct password → success
-[ ] Login with wrong password → error
-[ ] View uploaded files in admin
-[ ] Delete a file → disappears from list
-[ ] Stats update after delete
-[ ] "Vymazať test uploady" → preview shows correct count
-[ ] Execute cleanup → files gone from list
-[ ] Download individual file from admin
-
-COMPRESSION
-[ ] Upload a large JPEG (>2 MB) → check compressed size in admin
-[ ] Upload a HEIC from iPhone → uploaded as-is (no crash)
-[ ] Upload a video → no compression, uploads normally
-```
+### Network / mobile
+- [ ] Upload on good Wi-Fi
+- [ ] Upload on slow mobile data (throttle in DevTools → Slow 3G)
+- [ ] App opens from QR code on iPhone
+- [ ] App opens from QR code on Android
+- [ ] Offline banner appears when phone loses internet
