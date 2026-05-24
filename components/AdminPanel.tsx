@@ -199,6 +199,7 @@ function BulkActionBar({
   isDeleting,
   downloadState,
   downloadProgress,
+  downloadFailed,
   isMobile,
 }: {
   count: number;
@@ -208,6 +209,7 @@ function BulkActionBar({
   isDeleting: boolean;
   downloadState: DownloadState;
   downloadProgress: DownloadProgress;
+  downloadFailed: number;
   isMobile: boolean;
 }) {
   if (count === 0) return null;
@@ -237,9 +239,12 @@ function BulkActionBar({
           </span>
         )}
         {downloadState === "done" && (
-          <span className="font-sans text-sm text-sage-700 flex items-center gap-2">
+          <span className={`font-sans text-sm flex items-center gap-2
+                            ${downloadFailed > 0 ? "text-amber-700" : "text-sage-700"}`}>
             <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
-            Sťahovanie dokončené.
+            {downloadFailed > 0
+              ? `Dokončené · ${downloadFailed} nepodarilo sa`
+              : "Sťahovanie dokončené."}
           </span>
         )}
       </div>
@@ -617,6 +622,8 @@ export default function AdminPanel() {
   // Bulk download
   const [dlState, setDlState]       = useState<DownloadState>("idle");
   const [dlProgress, setDlProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
+  const [dlFailed, setDlFailed]     = useState<AdminFile[]>([]); // files whose blob-download failed
+  const [dlTotal, setDlTotal]       = useState(0);               // how many we attempted
 
   // Mobile save modal
   const [isMobile, setIsMobile]     = useState(false);
@@ -728,20 +735,25 @@ export default function AdminPanel() {
     if (toDownload.length === 0) return;
 
     setDlState("preparing");
+    setDlFailed([]);
+    setDlTotal(toDownload.length);
     await new Promise<void>((r) => setTimeout(r, 400));
 
     setDlState("downloading");
     setDlProgress({ current: 0, total: toDownload.length });
 
-    await downloadFilesSequentially(
+    const failed = await downloadFilesSequentially(
       toDownload,
       600,
       (current, total) => setDlProgress({ current, total })
     );
 
+    setDlFailed(failed);
     setDlState("done");
-    // Reset after a few seconds so the bar doesn't stay in "done" forever
-    setTimeout(() => setDlState("idle"), 4000);
+    // Auto-reset the "done" chip only when everything succeeded
+    if (failed.length === 0) {
+      setTimeout(() => setDlState("idle"), 4000);
+    }
   };
 
   // ── Bulk delete — show modal ──────────────────────────────────────────────
@@ -1063,12 +1075,56 @@ export default function AdminPanel() {
               count={selectedIds.size}
               onDelete={bulkDelete}
               onDownload={bulkDownload}
-              onClear={() => { clearSelection(); setDlState("idle"); }}
+              onClear={() => { clearSelection(); setDlState("idle"); setDlFailed([]); setDlTotal(0); }}
               isDeleting={bulkDeleting}
               downloadState={dlState}
               downloadProgress={dlProgress}
+              downloadFailed={dlFailed.length}
               isMobile={isMobile}
             />
+
+            {/* Download fallback panel — shown when some files couldn't be blob-downloaded */}
+            {dlFailed.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-sans text-sm font-semibold text-amber-800">
+                      {dlFailed.length === dlTotal
+                        ? "Prehliadač zablokoval hromadné sťahovanie."
+                        : `${dlFailed.length} súborov sa nepodarilo stiahnuť.`}
+                    </p>
+                    <p className="font-sans text-xs text-amber-700 mt-0.5">
+                      Stiahni ich jednotlivo cez tieto tlačidlá:
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setDlFailed([])}
+                    className="p-1.5 text-amber-400 hover:text-amber-700 rounded-lg
+                               hover:bg-amber-100 transition-colors flex-shrink-0 ml-3"
+                    aria-label="Zavrieť"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {dlFailed.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => downloadSingleFile(f.downloadUrl, f.original_file_name)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 bg-white
+                                 border border-amber-100 rounded-xl font-sans text-sm text-stone-700
+                                 hover:border-sage-300 hover:text-sage-800 transition-colors
+                                 group text-left"
+                    >
+                      <Download className="w-3.5 h-3.5 text-stone-300 group-hover:text-sage-600
+                                           flex-shrink-0" strokeWidth={1.5} />
+                      <span className="truncate">{f.original_file_name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* File list */}
             {filteredFiles.length === 0 ? (

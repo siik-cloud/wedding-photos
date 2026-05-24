@@ -140,7 +140,20 @@ export async function POST(req: NextRequest) {
       .createSignedUploadUrl(storagePath);
 
     if (error || !data) {
-      console.error("Supabase signed URL error:", error);
+      console.error("[upload/init] Supabase storage error:", error);
+      const msg = (error?.message ?? "").toLowerCase();
+      if (msg.includes("not found") || msg.includes("no such bucket") || msg.includes("bucket")) {
+        return NextResponse.json(
+          { error: "Úložisko nie je nastavené. Kontaktuj administrátora." },
+          { status: 503 }
+        );
+      }
+      if (msg.includes("quota") || msg.includes("limit") || msg.includes("capacity") || msg.includes("full")) {
+        return NextResponse.json(
+          { error: "Úložisko je plné. Kontaktuj organizátora svadby." },
+          { status: 507 }
+        );
+      }
       return NextResponse.json(
         { error: "Nepodarilo sa pripraviť nahrávanie. Skús znova." },
         { status: 500 }
@@ -159,6 +172,13 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[upload/init] Error:", err);
+    // Missing env vars — getSupabaseServer() throws with a descriptive message
+    if (err instanceof Error && err.message.includes("Missing environment variable")) {
+      return NextResponse.json(
+        { error: "Aplikácia nie je správne nakonfigurovaná. Kontaktuj administrátora." },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
       { error: "Interná chyba servera" },
       { status: 500 }

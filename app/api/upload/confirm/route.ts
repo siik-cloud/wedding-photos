@@ -33,8 +33,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Chýba názov súboru" }, { status: 400 });
     }
 
-    // Sanitise storage path — must match our expected pattern
-    const pathPattern = /^\d{4}\/\d{2}\/[a-f0-9-]+_.+$/;
+    // Sanitise storage path — must match our expected pattern.
+    // The ID segment uses UUID (hex+hyphens) in secure contexts, or a base-36
+    // fallback (alphanumeric+hyphen) when crypto.randomUUID() is unavailable.
+    // Both formats are covered by [A-Za-z0-9_-]+.
+    const pathPattern = /^\d{4}\/\d{2}\/[A-Za-z0-9_-]+_.+$/;
     if (!pathPattern.test(storagePath)) {
       return NextResponse.json({ error: "Neplatná cesta súboru" }, { status: 400 });
     }
@@ -81,9 +84,25 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (dbError) {
-      // Handle unique constraint violation (double confirm)
+      // Unique constraint — the file was already confirmed (double-submit race)
       if (dbError.code === "23505") {
         return NextResponse.json({ success: true, duplicate: true });
+      }
+      // Missing table — database schema not applied
+      if (dbError.code === "42P01") {
+        console.error("[upload/confirm] Table 'uploads' does not exist:", dbError);
+        return NextResponse.json(
+          { error: "Databáza nie je nastavená. Kontaktuj administrátora." },
+          { status: 503 }
+        );
+      }
+      // Missing column — schema mismatch / migration not run
+      if (dbError.code === "42703") {
+        console.error("[upload/confirm] Unknown column in 'uploads':", dbError);
+        return NextResponse.json(
+          { error: "Chyba schémy databázy. Kontaktuj administrátora." },
+          { status: 503 }
+        );
       }
       console.error("[upload/confirm] DB error:", dbError);
       return NextResponse.json(

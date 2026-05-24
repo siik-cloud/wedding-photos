@@ -65,6 +65,24 @@ function plural(n: number): string {
   return "súborov";
 }
 
+/** Returns true for HEIC/HEIF files — most browsers can't render them in <img>. */
+function isHeicFile(file: File): boolean {
+  return (
+    file.type === "image/heic" ||
+    file.type === "image/heif" ||
+    /\.(heic|heif)$/i.test(file.name)
+  );
+}
+
+/** Maps XHR HTTP status codes from the storage PUT to human-readable Slovak messages. */
+function xhrStatusMessage(status: number): string {
+  if (status === 400) return "Neplatný súbor — skús znova";
+  if (status === 403) return "Nahrávacie povolenie vypršalo — začni odznova";
+  if (status === 413) return "Súbor je príliš veľký pre server";
+  if (status === 507) return "Úložisko je plné — kontaktuj organizátora";
+  return `Chyba pri nahrávaní (${status})`;
+}
+
 function validateFile(file: File): { ok: boolean; reason?: string } {
   const kind = detectKind(file);
   if (kind === "unknown")
@@ -241,6 +259,7 @@ export default function UploadForm() {
   const [resumeData, setResumeData]           = useState<ResumeData | null>(null);
   const [batchLimitError, setBatchLimitError] = useState<BatchLimitError | null>(null);
   const [usedFirst30, setUsedFirst30]         = useState(false);
+  const [isOffline, setIsOffline]             = useState(false);
 
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const uploadingRef  = useRef(false);
@@ -250,6 +269,19 @@ export default function UploadForm() {
   useEffect(() => {
     const data = loadResumeData();
     if (data) setResumeData(data);
+  }, []);
+
+  // Detect loss of network connectivity so we can show an inline banner
+  // rather than making users wonder why uploads are stuck.
+  useEffect(() => {
+    const goOnline  = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener("online",  goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online",  goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
   }, []);
 
   const updateItem = useCallback((id: string, patch: Partial<FileItem>) => {
@@ -281,8 +313,11 @@ export default function UploadForm() {
       if (dup) continue;
 
       const isVideo = detectKind(file) === "video";
+      // HEIC/HEIF: most browsers cannot render these in <img> elements.
+      // Skip object URL creation to avoid a broken preview icon.
+      const heic = isHeicFile(file);
       let previewUrl: string | undefined;
-      if (!isVideo && file.size < 8 * 1024 * 1024)
+      if (!isVideo && !heic && file.size < 8 * 1024 * 1024)
         previewUrl = URL.createObjectURL(file);
 
       valid.push({ id: createId(), file, isVideo, status: "pending", progress: 0, previewUrl });
@@ -296,6 +331,7 @@ export default function UploadForm() {
     if (!e.target.files) return;
     const all = Array.from(e.target.files);
     e.target.value = ""; // clear immediately — must happen before any early return
+    if (all.length === 0) return; // user cancelled the picker on some browsers
     commitFiles(all);
   };
 
@@ -376,7 +412,11 @@ export default function UploadForm() {
           }
         });
         xhr.addEventListener("load", () => {
-          xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`));
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(xhrStatusMessage(xhr.status)));
+          }
         });
         xhr.addEventListener("error", () => reject(new Error("Chyba siete — skontroluj pripojenie")));
         xhr.addEventListener("abort", () => reject(new Error("Nahrávanie bolo prerušené")));
@@ -396,7 +436,16 @@ export default function UploadForm() {
           guestName: name || null,
         }),
       });
-      if (!confirmRes.ok) console.warn("[upload] confirm failed for", storagePath);
+
+      if (!confirmRes.ok) {
+        // The bytes landed in storage but the DB record failed.
+        // Show an error so the user can retry — a retry will re-upload cleanly.
+        console.warn("[upload] confirm failed for", storagePath);
+        const body = await confirmRes.json().catch(() => ({}));
+        throw new Error(
+          (body as { error?: string }).error || "Nahrávanie sa nepodarilo dokončiť — skús znova"
+        );
+      }
 
       updateItem(item.id, { status: "done", progress: 100 });
       return true;
@@ -501,6 +550,17 @@ export default function UploadForm() {
   /* ── Upload form ────────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
+      {/* Offline warning — shown whenever the browser loses network */}
+      {isOffline && (
+        <div className="flex items-center gap-2.5 bg-red-50 border border-red-200
+                        rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" strokeWidth={1.5} />
+          <p className="font-sans text-sm text-red-700">
+            Nie si pripojený na internet. Nahrávanie bude pokračovať po obnovení spojenia.
+          </p>
+        </div>
+      )}
+
       {resumeData && items.length === 0 && (
         <ResumeBanner data={resumeData} onResume={handleResume} onDismiss={handleDismissResume} />
       )}

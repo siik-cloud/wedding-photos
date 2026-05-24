@@ -11,6 +11,7 @@ import {
   Loader2,
   Inbox,
   User,
+  ImageIcon,
   CheckCircle,
   AlertCircle,
 } from "lucide-react";
@@ -56,6 +57,9 @@ export default function GalleryView() {
   const [isMobile, setIsMobile]           = useState(false);
   const [mobileFile, setMobileFile]       = useState<UploadWithUrl | null>(null);
 
+  // Lightbox: track whether the current image/video failed to load
+  const [lightboxMediaError, setLightboxMediaError] = useState(false);
+
   // Swipe detection refs
   const swipeTouchStartX = useRef<number | null>(null);
   const swipeTouchStartY = useRef<number | null>(null);
@@ -97,6 +101,11 @@ export default function GalleryView() {
   const goNext = useCallback(() => {
     setLightboxIndex((i) => i !== null ? (i + 1) % files.length : null);
   }, [files.length]);
+
+  // Clear the "media failed to load" flag whenever the shown file changes.
+  useEffect(() => {
+    setLightboxMediaError(false);
+  }, [lightboxIndex]);
 
   useEffect(() => {
     if (lightboxIndex === null) return;
@@ -549,13 +558,20 @@ export default function GalleryView() {
               className="h-full w-full flex items-center justify-center px-14 md:px-20"
               onClick={(e) => e.stopPropagation()}
             >
-              {currentFile.file_type === "video" ? (
+              {lightboxMediaError ? (
+                /* Broken / missing file — show a neutral placeholder */
+                <div className="flex flex-col items-center gap-3 text-white/30 py-12">
+                  <ImageIcon className="w-14 h-14" strokeWidth={1} />
+                  <p className="font-sans text-sm">Súbor nie je dostupný</p>
+                </div>
+              ) : currentFile.file_type === "video" ? (
                 <video
                   key={currentFile.id}
                   src={currentFile.url}
                   controls
                   playsInline
                   className="max-h-full max-w-full rounded-xl"
+                  onError={() => setLightboxMediaError(true)}
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -564,6 +580,7 @@ export default function GalleryView() {
                   src={currentFile.url}
                   alt={currentFile.original_file_name}
                   className="max-h-full max-w-full rounded-xl object-contain"
+                  onError={() => setLightboxMediaError(true)}
                 />
               )}
             </div>
@@ -633,6 +650,11 @@ function GalleryTile({
   onClick: () => void;
   onDownload: () => void;
 }) {
+  // Track per-tile load failures so we can show a graceful fallback
+  // instead of a broken-image icon or an invisible element.
+  const [imgError,   setImgError]   = useState(false);
+  const [videoError, setVideoError] = useState(false);
+
   return (
     <div
       className={`relative aspect-square bg-stone-100 rounded-xl overflow-hidden
@@ -641,21 +663,31 @@ function GalleryTile({
       onClick={selecting ? onToggle : onClick}
     >
       {file.file_type === "video" ? (
-        /* preload="metadata" loads only the first keyframe — no full download needed */
+        /* preload="metadata" loads only the first keyframe — no full download needed.
+           If the video URL is broken/missing, videoError hides the element so the
+           dark background + play-button overlay remain as a usable fallback. */
         <div className="w-full h-full relative bg-stone-900 overflow-hidden">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video
-            src={file.url}
-            preload="metadata"
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-          />
+          {!videoError && (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <video
+              src={file.url}
+              preload="metadata"
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+              onError={() => setVideoError(true)}
+            />
+          )}
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-black/50 rounded-full p-2.5">
               <Play className="w-5 h-5 text-white" strokeWidth={1.5} fill="white" />
             </div>
           </div>
+        </div>
+      ) : imgError ? (
+        /* Broken / missing image — neutral placeholder keeps the grid tidy */
+        <div className="w-full h-full flex items-center justify-center bg-stone-100">
+          <ImageIcon className="w-7 h-7 text-stone-300" strokeWidth={1.5} />
         </div>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
@@ -664,6 +696,7 @@ function GalleryTile({
           alt={file.original_file_name}
           className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
           loading="lazy"
+          onError={() => setImgError(true)}
         />
       )}
 
