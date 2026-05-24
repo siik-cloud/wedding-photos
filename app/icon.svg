@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="#2d4929"/>
+
+  <!-- Camera body -->
+  <rect x="5" y="12" width="22" height="14" rx="2.5" fill="#faf9f7"/>
+
+  <!-- Viewfinder bump -->
+  <path d="M11 12V9.5C11 8.7 11.7 8 12.5 8H17.5C18.3 8 19 8.7 19 9.5V12H11Z" fill="#faf9f7"/>
+
+  <!-- Lens: dark ring, white ring, dark center -->
+  <circle cx="16" cy="19" r="5.2" fill="#2d4929"/>
+  <circle cx="16" cy="19" r="3.6" fill="#faf9f7"/>
+  <circle cx="16" cy="19" r="1.8" fill="#2d4929"/>
+
+  <!-- Flash indicator dot -->
+  <circle cx="7.5" cy="15" r="1.2" fill="#2d4929"/>
+</svg>

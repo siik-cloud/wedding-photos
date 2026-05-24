@@ -10,6 +10,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Fotky zo svadby Katky a Šimona",
   description: "Nahraj svoje fotky a videá zo svadby.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/icon.svg",
+  },
   openGraph: {
     title: "Fotky zo svadby Katky a Šimona",
     description: "Nahraj svoje fotky a videá zo svadby.",
