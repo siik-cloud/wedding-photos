@@ -233,7 +233,7 @@ function BulkActionBar({
         {downloadState === "downloading" && (
           <span className="font-sans text-sm text-stone-700 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-            Sťahujem {downloadProgress.current}&nbsp;/&nbsp;{downloadProgress.total}…
+            Sťahujem súbor&nbsp;{downloadProgress.current}&nbsp;z&nbsp;{downloadProgress.total}…
           </span>
         )}
         {downloadState === "done" && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Download,
   X,
@@ -48,10 +48,15 @@ export default function GalleryView() {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
   const [showFallback, setShowFallback]         = useState(false);
   const [fallbackFiles, setFallbackFiles]       = useState<UploadWithUrl[]>([]);
+  const [downloadResult, setDownloadResult]     = useState<{ success: number; failed: number } | null>(null);
 
   // Mobile save modal
   const [isMobile, setIsMobile]           = useState(false);
   const [mobileFile, setMobileFile]       = useState<UploadWithUrl | null>(null);
+
+  // Swipe detection refs
+  const swipeTouchStartX = useRef<number | null>(null);
+  const swipeTouchStartY = useRef<number | null>(null);
 
   useEffect(() => { fetchGallery(); }, []);
   useEffect(() => { setIsMobile(isMobileDevice()); }, []);
@@ -82,23 +87,34 @@ export default function GalleryView() {
   };
   const closeLightbox = () => setLightboxIndex(null);
 
+  // Loop-around navigation — last → first and first → last
   const goPrev = useCallback(() => {
-    setLightboxIndex((i) => i !== null ? Math.max(0, i - 1) : null);
-  }, []);
+    setLightboxIndex((i) => i !== null ? (i - 1 + files.length) % files.length : null);
+  }, [files.length]);
 
   const goNext = useCallback(() => {
-    setLightboxIndex((i) => i !== null ? Math.min(files.length - 1, i + 1) : null);
+    setLightboxIndex((i) => i !== null ? (i + 1) % files.length : null);
   }, [files.length]);
 
   useEffect(() => {
     if (lightboxIndex === null) return;
+
+    // Keyboard navigation
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape")     closeLightbox();
       if (e.key === "ArrowLeft")  goPrev();
       if (e.key === "ArrowRight") goNext();
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+
+    // Prevent background scroll while lightbox is open
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [lightboxIndex, goPrev, goNext]);
 
   // ── Selection ───────────────────────────────────────────────────────────────
@@ -142,6 +158,30 @@ export default function GalleryView() {
     }
   }, [isMobile]);
 
+  // ── Swipe handlers ───────────────────────────────────────────────────────
+  // Place onTouchStart / onTouchEnd on the lightbox overlay.
+  // Distinguishes a horizontal swipe (|dx| > |dy| and |dx| > 48px) from a tap.
+  // e.preventDefault() on touchend suppresses the resulting click so the
+  // lightbox is not accidentally closed after a swipe.
+
+  const handleLightboxTouchStart = useCallback((e: React.TouchEvent) => {
+    swipeTouchStartX.current = e.touches[0].clientX;
+    swipeTouchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleLightboxTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (swipeTouchStartX.current === null || swipeTouchStartY.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeTouchStartX.current;
+    const dy = e.changedTouches[0].clientY - swipeTouchStartY.current;
+    swipeTouchStartX.current = null;
+    swipeTouchStartY.current = null;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 48) {
+      e.preventDefault(); // stop the following click from closing the lightbox
+      if (dx < 0) goNext();
+      else goPrev();
+    }
+  }, [goNext, goPrev]);
+
   // ── Bulk download ───────────────────────────────────────────────────────────
   //
   // Strategy: fetch each file as a Blob → same-origin object URL → anchor click.
@@ -157,9 +197,9 @@ export default function GalleryView() {
 
     setDownloadState("preparing");
     setShowFallback(false);
-    setFallbackFiles(toDownload); // pre-fill fallback list
+    setFallbackFiles([]);
+    setDownloadResult(null);
 
-    // Brief pause so "Pripravujem…" is visible
     await new Promise<void>((r) => setTimeout(r, 400));
 
     setDownloadState("downloading");
@@ -171,10 +211,15 @@ export default function GalleryView() {
       (current, total) => setDownloadProgress({ current, total })
     );
 
+    const successCount = toDownload.length - failed.length;
+    setDownloadResult({ success: successCount, failed: failed.length });
     setDownloadState("done");
-    // Show the fallback panel: failed files first, then all files as reference
-    setFallbackFiles(failed.length > 0 ? failed : toDownload);
-    setShowFallback(true);
+
+    // Only show the fallback panel when files actually failed
+    if (failed.length > 0) {
+      setFallbackFiles(failed);
+      setShowFallback(true);
+    }
   };
 
   // ── States ──────────────────────────────────────────────────────────────────
@@ -279,13 +324,15 @@ export default function GalleryView() {
             {downloadState === "downloading" && (
               <span className="font-sans text-sm text-stone-700 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-                Sťahujem {downloadProgress.current}&nbsp;/&nbsp;{downloadProgress.total} súborov…
+                Sťahujem súbor&nbsp;{downloadProgress.current}&nbsp;z&nbsp;{downloadProgress.total}…
               </span>
             )}
             {downloadState === "done" && (
               <span className="font-sans text-sm text-sage-700 flex items-center gap-2">
                 <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
-                Sťahovanie dokončené.
+                {downloadResult
+                  ? `Stiahnuté: ${downloadResult.success}${downloadResult.failed > 0 ? ` · Nepodarilo sa: ${downloadResult.failed}` : ""}`
+                  : "Sťahovanie dokončené."}
               </span>
             )}
           </div>
@@ -311,7 +358,11 @@ export default function GalleryView() {
 
           {downloadState === "done" && (
             <button
-              onClick={() => { setDownloadState("idle"); setShowFallback(false); }}
+              onClick={() => {
+                setDownloadState("idle");
+                setShowFallback(false);
+                setDownloadResult(null);
+              }}
               className="font-sans text-xs font-medium text-stone-400 hover:text-stone-600
                          transition-colors flex-shrink-0"
             >
@@ -335,31 +386,31 @@ export default function GalleryView() {
 
       {/* ── Fallback links panel ──────────────────────────────────────────────── */}
       {showFallback && fallbackFiles.length > 0 && (
-        <div className="mb-6 bg-sage-50 border border-sage-200 rounded-2xl p-5">
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-5">
           <div className="flex items-start justify-between mb-3">
-            <div>
-              {fallbackFiles.length === selectedCount ? (
+            <div className="flex-1 min-w-0">
+              {downloadResult?.success === 0 ? (
                 <>
-                  <p className="font-sans text-sm font-semibold text-stone-800">
-                    Priame odkazy na stiahnutie
+                  <p className="font-sans text-sm font-semibold text-red-800">
+                    Prehliadač zablokoval hromadné sťahovanie.
                   </p>
-                  <p className="font-sans text-xs text-stone-500 mt-0.5 leading-relaxed">
-                    Ak prehliadač zablokoval niektoré súbory, stiahni ich cez tieto odkazy.
+                  <p className="font-sans text-xs text-stone-600 mt-0.5 leading-relaxed">
+                    Stiahni všetky súbory cez tieto odkazy:
                   </p>
                 </>
               ) : (
                 <>
                   <p className="font-sans text-sm font-semibold text-amber-800">
-                    Niektoré súbory sa nepodarilo stiahnuť
+                    Niektoré súbory sa nepodarilo stiahnuť.
                   </p>
-                  <p className="font-sans text-xs text-stone-500 mt-0.5 leading-relaxed">
-                    Stiahni ich manuálne cez tieto priame odkazy.
+                  <p className="font-sans text-xs text-stone-600 mt-0.5 leading-relaxed">
+                    Stiahni ich manuálne cez tieto priame odkazy:
                   </p>
                 </>
               )}
             </div>
             <button
-              onClick={() => { setShowFallback(false); }}
+              onClick={() => setShowFallback(false)}
               className="p-1.5 text-stone-400 hover:text-stone-600 rounded-lg
                          hover:bg-stone-100 transition-colors flex-shrink-0 ml-3"
               aria-label="Zavrieť"
@@ -370,20 +421,19 @@ export default function GalleryView() {
 
           <div className="space-y-1.5">
             {fallbackFiles.map((f) => (
-              <a
+              <button
                 key={f.id}
-                href={f.downloadUrl}
-                download={f.original_file_name}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2.5 px-3 py-2.5 bg-white border border-sage-100
-                           rounded-xl font-sans text-sm text-stone-700 hover:border-sage-300
-                           hover:text-sage-800 transition-colors group"
+                type="button"
+                onClick={() => downloadSingleFile(f.downloadUrl, f.original_file_name)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 bg-white
+                           border border-red-100 rounded-xl font-sans text-sm text-stone-700
+                           hover:border-sage-300 hover:text-sage-800 transition-colors
+                           group text-left"
               >
                 <Download className="w-3.5 h-3.5 text-stone-300 group-hover:text-sage-600
                                      flex-shrink-0" strokeWidth={1.5} />
                 <span className="truncate">{f.original_file_name}</span>
-              </a>
+              </button>
             ))}
           </div>
         </div>
@@ -409,22 +459,24 @@ export default function GalleryView() {
         <div
           className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
           onClick={closeLightbox}
+          onTouchStart={handleLightboxTouchStart}
+          onTouchEnd={handleLightboxTouchEnd}
         >
           {/* Close */}
           <button
             className="absolute top-4 right-4 z-10 text-white/70 hover:text-white
-                       bg-black/30 rounded-full p-2 transition-colors"
+                       bg-black/30 rounded-full p-2.5 transition-colors"
             onClick={closeLightbox}
             aria-label="Zavrieť"
           >
             <X className="w-5 h-5" />
           </button>
 
-          {/* Prev */}
-          {lightboxIndex > 0 && (
+          {/* Prev — always visible when there are multiple files (loops around) */}
+          {files.length > 1 && (
             <button
-              className="absolute left-3 z-10 text-white/70 hover:text-white
-                         bg-black/30 rounded-full p-2 transition-colors"
+              className="absolute left-2 sm:left-3 z-10 text-white/70 hover:text-white
+                         bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
               onClick={(e) => { e.stopPropagation(); goPrev(); }}
               aria-label="Predchádzajúca"
             >
@@ -432,11 +484,11 @@ export default function GalleryView() {
             </button>
           )}
 
-          {/* Next */}
-          {lightboxIndex < files.length - 1 && (
+          {/* Next — always visible when there are multiple files (loops around) */}
+          {files.length > 1 && (
             <button
-              className="absolute right-3 z-10 text-white/70 hover:text-white
-                         bg-black/30 rounded-full p-2 transition-colors"
+              className="absolute right-2 sm:right-3 z-10 text-white/70 hover:text-white
+                         bg-black/30 rounded-full p-3 sm:p-2.5 transition-colors"
               onClick={(e) => { e.stopPropagation(); goNext(); }}
               aria-label="Nasledujúca"
             >
@@ -454,7 +506,6 @@ export default function GalleryView() {
                 key={currentFile.id}
                 src={currentFile.url}
                 controls
-                autoPlay
                 playsInline
                 className="max-h-[80vh] max-w-full mx-auto rounded-xl"
               />

@@ -227,18 +227,25 @@ function ResumeBanner({
   );
 }
 
-export default function UploadForm() {
-  const [guestName, setGuestName]       = useState("");
-  const [items, setItems]               = useState<FileItem[]>([]);
-  const [rejected, setRejected]         = useState<Rejected[]>([]);
-  const [isUploading, setIsUploading]   = useState(false);
-  const [isDragOver, setIsDragOver]     = useState(false);
-  const [showSuccess, setShowSuccess]   = useState(false);
-  const [successCount, setSuccessCount] = useState(0);
-  const [resumeData, setResumeData]     = useState<ResumeData | null>(null);
+// Immediate count error — shown BEFORE any file processing
+interface BatchLimitError { count: number; }
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadingRef = useRef(false);
+export default function UploadForm() {
+  const [guestName, setGuestName]             = useState("");
+  const [items, setItems]                     = useState<FileItem[]>([]);
+  const [rejected, setRejected]               = useState<Rejected[]>([]);
+  const [isUploading, setIsUploading]         = useState(false);
+  const [isDragOver, setIsDragOver]           = useState(false);
+  const [showSuccess, setShowSuccess]         = useState(false);
+  const [successCount, setSuccessCount]       = useState(0);
+  const [resumeData, setResumeData]           = useState<ResumeData | null>(null);
+  const [batchLimitError, setBatchLimitError] = useState<BatchLimitError | null>(null);
+  const [usedFirst30, setUsedFirst30]         = useState(false);
+
+  const fileInputRef  = useRef<HTMLInputElement>(null);
+  const uploadingRef  = useRef(false);
+  // Stores all selected files when count > MAX_FILES so "Use first 30" can access them
+  const pendingAllRef = useRef<File[]>([]);
 
   useEffect(() => {
     const data = loadResumeData();
@@ -285,13 +292,36 @@ export default function UploadForm() {
     if (bad.length  > 0) setRejected((prev) => [...prev, ...bad]);
   }, [items]);
 
-  const handleFileInput  = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
+  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const all = Array.from(e.target.files);
+    e.target.value = ""; // clear immediately — must happen before any early return
+    commitFiles(all);
   };
+
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files) addFiles(Array.from(e.dataTransfer.files));
+    const all = Array.from(e.dataTransfer.files);
+    commitFiles(all);
+  };
+
+  /**
+   * Gate between raw file selection and addFiles().
+   * Checks total count first — before ANY preview URL creation or compression.
+   * If the count exceeds MAX_FILES, shows an error immediately without processing.
+   */
+  const commitFiles = (all: File[]) => {
+    setBatchLimitError(null);
+    setUsedFirst30(false);
+    const incoming = items.length + all.length;
+    if (incoming > MAX_FILES) {
+      pendingAllRef.current = all;
+      setBatchLimitError({ count: all.length });
+      return;
+    }
+    pendingAllRef.current = [];
+    addFiles(all);
   };
   const removeItem = (id: string) => {
     setItems((prev) => {
@@ -421,6 +451,7 @@ export default function UploadForm() {
   const handleUploadMore = () => {
     items.forEach((i) => { if (i.previewUrl) URL.revokeObjectURL(i.previewUrl); });
     setItems([]); setRejected([]); setGuestName(""); setShowSuccess(false);
+    setBatchLimitError(null); setUsedFirst30(false); pendingAllRef.current = [];
   };
 
   const doneCount      = items.filter((i) => i.status === "done" || i.status === "skipped").length;
@@ -525,16 +556,77 @@ export default function UploadForm() {
         </p>
         <p className="text-xs text-stone-400 leading-relaxed">
           Klikni alebo presuň súbory sem
-          <br />
-          Fotky max 25 MB · Videá max 250 MB
+        </p>
+        <p className="text-xs text-stone-400 mt-1.5">
+          Max.&nbsp;{MAX_FILES}&nbsp;súborov naraz&nbsp;·&nbsp;fotka do&nbsp;25&nbsp;MB&nbsp;·&nbsp;video do&nbsp;250&nbsp;MB
         </p>
       </div>
 
       {/* Empty hint */}
-      {items.length === 0 && !resumeData && (
+      {items.length === 0 && !resumeData && !batchLimitError && (
         <p className="text-center text-xs text-stone-400 leading-relaxed">
-          Vyber fotky alebo videá a počkaj, kým sa nahrávanie dokončí.
+          Máš viac súborov? Nahraj ich po častiach.
         </p>
+      )}
+
+      {/* ── Batch count error (shown immediately, before any processing) ── */}
+      {batchLimitError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-start gap-3 mb-4">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-800 mb-1">
+                Príliš veľa súborov
+              </p>
+              <p className="text-sm text-red-700 leading-relaxed">
+                Vybral/a si {batchLimitError.count}&nbsp;{plural(batchLimitError.count)}. Naraz môžeš
+                nahrať maximálne {MAX_FILES}.
+              </p>
+              <p className="text-xs text-red-600 mt-1">
+                Vyber prosím menej súborov alebo ich nahraj po častiach.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setBatchLimitError(null);
+                pendingAllRef.current = [];
+                fileInputRef.current?.click();
+              }}
+              className="px-4 py-2 bg-red-500 text-white rounded-xl text-sm font-semibold
+                         hover:bg-red-600 transition-colors"
+            >
+              Vybrať znova
+            </button>
+            <button
+              onClick={() => {
+                const first = pendingAllRef.current.slice(0, MAX_FILES);
+                pendingAllRef.current = [];
+                setBatchLimitError(null);
+                setUsedFirst30(true);
+                addFiles(first);
+              }}
+              className="px-4 py-2 border border-red-200 text-red-700 rounded-xl text-sm
+                         font-semibold hover:bg-red-50 transition-colors"
+            >
+              Použiť prvých&nbsp;{MAX_FILES}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* First-30 truncation notice */}
+      {usedFirst30 && items.length > 0 && (
+        <div className="flex items-start gap-2 bg-sage-50 border border-sage-200
+                        rounded-xl px-4 py-3">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sage-500"
+                       strokeWidth={1.5} />
+          <p className="font-sans text-xs text-stone-600 leading-relaxed">
+            Používame prvých {MAX_FILES} súborov. Zvyšné môžeš nahrať potom.
+          </p>
+        </div>
       )}
 
       {/* Rejected files */}
@@ -592,7 +684,7 @@ export default function UploadForm() {
               <button
                 onClick={() => {
                   items.forEach((i) => { if (i.previewUrl) URL.revokeObjectURL(i.previewUrl); });
-                  setItems([]);
+                  setItems([]); setUsedFirst30(false);
                 }}
                 className="text-xs text-stone-400 hover:text-red-400 transition-colors"
               >
