@@ -3,7 +3,7 @@ import {
   getSupabaseServer,
   BUCKET_NAME,
   isGalleryEnabled,
-} from "@/lib/supabase-server";
+} from "@/lib/supabase/server-client";
 import type { Upload, UploadWithUrl } from "@/types";
 
 // Gallery signed URLs expire after 2 hours

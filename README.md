@@ -134,10 +134,10 @@ Supabase dashboard → **Settings** → **API**:
 | Key | Env variable |
 |-----|-------------|
 | Project URL | `NEXT_PUBLIC_SUPABASE_URL` |
-| `anon` / public | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
-| `service_role` / secret | `SUPABASE_SERVICE_ROLE_KEY` |
+| Publishable key | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
+| Secret key | `SUPABASE_SECRET_KEY` |
 
-> ⚠️ Never commit the `service_role` key. It goes only in server-side env vars.
+> ⚠️ Never commit the secret key. It goes only in server-side env vars and is never sent to the browser.
 
 ---
 
@@ -152,8 +152,12 @@ cp .env.local.example .env.local
 ```env
 # .env.local
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+# Publishable key — safe for the browser (replaces legacy NEXT_PUBLIC_SUPABASE_ANON_KEY)
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=eyJ...
+
+# Secret key — server-side only, never exposed to the browser (replaces legacy SUPABASE_SERVICE_ROLE_KEY)
+SUPABASE_SECRET_KEY=eyJ...
 
 # Admin panel password — choose something strong
 ADMIN_PASSWORD=your-strong-password
@@ -164,6 +168,10 @@ ADMIN_PASSWORD=your-strong-password
 # Format: ISO 8601 (any timezone)
 # Example: 2026-06-06T10:00:00+02:00
 WEDDING_START_TIMESTAMP=2026-06-06T10:00:00+02:00
+
+# Cron secret — protects the /api/cron/purge-trash endpoint.
+# Generate: openssl rand -hex 32
+CRON_SECRET=replace-with-a-strong-random-secret
 ```
 
 ---
@@ -218,13 +226,14 @@ Open **`http://192.168.1.42:3000`** on your phone (same Wi-Fi).
 
 2. [vercel.com](https://vercel.com) → **Add New Project** → Import your repo
 
-3. Under **Environment Variables**, add all 5 variables:
+3. Under **Environment Variables**, add all variables:
    ```
    NEXT_PUBLIC_SUPABASE_URL
-   NEXT_PUBLIC_SUPABASE_ANON_KEY
-   SUPABASE_SERVICE_ROLE_KEY
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+   SUPABASE_SECRET_KEY
    ADMIN_PASSWORD
    WEDDING_START_TIMESTAMP   ← optional but recommended
+   CRON_SECRET               ← required for trash auto-purge
    ```
 
 4. Click **Deploy** (~2 min). You'll get a URL like `https://wedding-photos-abc.vercel.app`
@@ -341,10 +350,11 @@ Download files one by one using the download button in the admin file list.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Public key (safe for browser) |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Secret key — server-side only! |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ✅ | Publishable key — safe for browser use |
+| `SUPABASE_SECRET_KEY` | ✅ | Secret key — server-side only, never in browser! |
 | `ADMIN_PASSWORD` | ✅ | Admin panel password |
 | `WEDDING_START_TIMESTAMP` | ☑️ | ISO date; files before this = test uploads |
+| `CRON_SECRET` | ☑️ | Protects `/api/cron/purge-trash` — required for trash auto-purge |
 
 ---
 

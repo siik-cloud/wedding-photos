@@ -1,14 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
-
-// Client-side Supabase client — uses the public anon key
-// Safe to use in the browser, limited by RLS policies
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY"
-  );
-}
-
-export const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+/**
+ * @deprecated
+ * This file is a compatibility shim. All imports should be updated to:
+ *   import { supabaseBrowser } from "@/lib/supabase/browser-client"
+ *
+ * This shim will be removed in a future cleanup.
+ */
+export { supabaseBrowser as supabaseClient } from "@/lib/supabase/browser-client";

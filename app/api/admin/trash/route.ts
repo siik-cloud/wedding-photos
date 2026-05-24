@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
-import { getSupabaseServer, BUCKET_NAME } from "@/lib/supabase-server";
+import { getSupabaseServer, BUCKET_NAME } from "@/lib/supabase/server-client";
 import type { Upload, UploadWithUrl } from "@/types";
 
 const SIGNED_URL_EXPIRY = 4 * 60 * 60; // 4 hours

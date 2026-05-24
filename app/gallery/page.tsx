@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isGalleryEnabled } from "@/lib/supabase-server";
+import { isGalleryEnabled } from "@/lib/supabase/server-client";
 import GalleryView from "@/components/GalleryView";
 
 export const dynamic = "force-dynamic";

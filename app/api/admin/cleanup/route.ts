@@ -13,7 +13,7 @@
 
 import { NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
-import { getSupabaseServer, BUCKET_NAME } from "@/lib/supabase-server";
+import { getSupabaseServer, BUCKET_NAME } from "@/lib/supabase/server-client";
 
 export const dynamic = "force-dynamic";
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
-import { getSupabaseServer } from "@/lib/supabase-server";
+import { getSupabaseServer } from "@/lib/supabase/server-client";
 
 export const dynamic = "force-dynamic";
 
