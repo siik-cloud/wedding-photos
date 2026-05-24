@@ -6,14 +6,13 @@ import { useRouter } from "next/navigation";
 
 export default function AdminLogin() {
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
   const router = useRouter();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!password || loading) return;
-
     setLoading(true);
     setError("");
 
@@ -28,9 +27,7 @@ export default function AdminLogin() {
         router.refresh();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(
-          (data as { error?: string }).error || "Nesprávne heslo"
-        );
+        setError((data as { error?: string }).error || "Nesprávne heslo");
       }
     } catch {
       setError("Chyba pripojenia — skús znova");
@@ -40,17 +37,20 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="max-w-sm mx-auto mt-12">
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-sage-100 rounded-full flex items-center justify-center mx-auto mb-3">
-            <Lock className="w-6 h-6 text-sage-600" />
+    <div className="max-w-sm mx-auto mt-16 px-4">
+      <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-sm">
+
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-11 h-11 rounded-xl bg-stone-100 flex items-center justify-center mb-4">
+            <Lock className="w-5 h-5 text-stone-500" strokeWidth={1.5} />
           </div>
-          <h2 className="text-xl font-semibold text-gray-800">Prihlásenie</h2>
-          <p className="text-gray-500 text-sm mt-1">Zadaj admin heslo</p>
+          <h2 className="font-sans text-lg font-semibold text-stone-900 tracking-tight">
+            Prihlásenie
+          </h2>
+          <p className="font-sans text-sm text-stone-500 mt-1">Zadaj administrátorské heslo</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <input
             type="password"
             value={password}
@@ -58,30 +58,27 @@ export default function AdminLogin() {
             placeholder="Heslo"
             autoComplete="current-password"
             disabled={loading}
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl text-base
-                       focus:outline-none focus:ring-2 focus:ring-sage-300 focus:border-transparent
-                       disabled:opacity-60"
+            className="w-full px-4 py-3 border border-stone-200 rounded-xl text-sm
+                       text-stone-900 placeholder-stone-400
+                       focus:outline-none focus:ring-2 focus:ring-sage-200 focus:border-sage-400
+                       disabled:opacity-50 transition-colors"
           />
 
           {error && (
-            <p className="text-sm text-red-500 text-center">{error}</p>
+            <p className="text-sm text-red-600 text-center">{error}</p>
           )}
 
           <button
             type="submit"
             disabled={loading || !password}
-            className="w-full py-3 bg-sage-500 text-white rounded-xl font-semibold
-                       hover:bg-sage-600 transition-colors disabled:opacity-50
-                       disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 bg-sage-800 text-white rounded-lg font-sans text-sm
+                       font-medium tracking-[0.03em] hover:bg-sage-900 transition-colors
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       flex items-center justify-center gap-2"
           >
             {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Prihlasuje sa...
-              </>
-            ) : (
-              "Prihlásiť sa"
-            )}
+              <><Loader2 className="w-4 h-4 animate-spin" /> Prihlasujem…</>
+            ) : "Prihlásiť sa"}
           </button>
         </form>
       </div>

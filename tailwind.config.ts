@@ -8,9 +8,13 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans:  ["var(--font-inter)",     "system-ui", "sans-serif"],
+        serif: ["var(--font-cormorant)", "Georgia",   "serif"],
+      },
       colors: {
         sage: {
-          50: "#f4f8f3",
+          50:  "#f4f8f3",
           100: "#e6f0e4",
           200: "#cde1ca",
           300: "#a7c9a2",
@@ -21,17 +25,12 @@ const config: Config = {
           800: "#2d4929",
           900: "#263c23",
         },
-        rose: {
-          50: "#fff1f2",
-          100: "#ffe4e6",
-          200: "#fecdd3",
-          300: "#fda4af",
-          400: "#fb7185",
-          500: "#f43f5e",
-        },
       },
-      fontFamily: {
-        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
+      borderRadius: {
+        "3xl": "1.5rem",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "cubic-bezier(0.4, 0, 0.2, 1)",
       },
     },
   },

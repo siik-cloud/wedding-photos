@@ -1,0 +1,79 @@
+/**
+ * Bulk download utilities.
+ *
+ * The `download` HTML attribute is silently ignored for cross-origin URLs in
+ * Chrome/Edge — the browser previews the file instead of saving it.
+ * To force a real download we fetch the file as a Blob first, create a
+ * same-origin object URL from it, and trigger the anchor click from there.
+ * Blob URLs ARE same-origin, so the `download` attribute is honoured.
+ *
+ * Supabase Storage returns permissive CORS headers (Access-Control-Allow-Origin: *)
+ * so `fetch()` works from any front-end origin.
+ */
+
+export type DownloadState = "idle" | "preparing" | "downloading" | "done";
+
+export interface DownloadProgress {
+  current: number;
+  total: number;
+}
+
+/**
+ * Fetches one file as a Blob and triggers a native save-file dialog.
+ * Returns `true` on success, `false` on any network / browser error.
+ */
+export async function downloadFileAsBlob(
+  url: string,
+  filename: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) return false;
+
+    const blob   = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href     = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+
+    // Keep the element in DOM briefly so the click isn't lost
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }, 400);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Downloads a list of files sequentially, with `delayMs` between each one.
+ * Calls `onProgress(current, total)` before each download starts.
+ * Returns the subset of files whose download failed.
+ */
+export async function downloadFilesSequentially<
+  T extends { downloadUrl: string; original_file_name: string }
+>(
+  files: T[],
+  delayMs: number,
+  onProgress: (current: number, total: number) => void
+): Promise<T[]> {
+  const failed: T[] = [];
+
+  for (let i = 0; i < files.length; i++) {
+    onProgress(i + 1, files.length);
+    const ok = await downloadFileAsBlob(files[i].downloadUrl, files[i].original_file_name);
+    if (!ok) failed.push(files[i]);
+
+    if (i < files.length - 1) {
+      await new Promise<void>((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  return failed;
+}

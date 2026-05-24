@@ -1,76 +1,72 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { Camera, Images, Info } from "lucide-react";
+import { Info, Camera, Images } from "lucide-react";
 
 export default function MobileNav() {
   const pathname = usePathname();
-  const router   = useRouter();
 
-  // Never show on admin pages
   if (pathname.startsWith("/admin")) return null;
 
-  const isUpload  = pathname === "/";
+  // "Info" is active when on the homepage (info lives there)
+  const isHome    = pathname === "/";
+  // "Nahrať" is active when on the dedicated /upload route
+  const isUpload  = pathname === "/upload";
+  // "Galéria" is active on /gallery
   const isGallery = pathname === "/gallery";
-
-  const handleInfo = () => {
-    if (pathname === "/") {
-      document.getElementById("wedding-info")?.scrollIntoView({ behavior: "smooth" });
-    } else {
-      router.push("/#wedding-info");
-    }
-  };
 
   return (
     <nav
-      aria-label="Hlavná navigácia"
+      aria-label="Navigácia"
       className="fixed bottom-0 left-0 right-0 z-50
-                 bg-white/95 backdrop-blur-sm border-t border-gray-200
+                 bg-white/96 backdrop-blur-md border-t border-sage-100
                  pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex items-stretch max-w-xl mx-auto h-[62px]">
+      <div className="flex items-stretch max-w-xl mx-auto h-[60px]">
 
-        {/* ── Gallery ─────────────────────────────────────────────────── */}
+        {/* Info — links to homepage info section */}
         <Link
-          href="/gallery"
-          className={`flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold
-                      transition-colors
-                      ${isGallery
-                        ? "text-sage-600"
-                        : "text-gray-400 hover:text-gray-600"}`}
+          href="/#wedding-info"
+          className={`flex flex-1 flex-col items-center justify-center gap-0.5
+                      font-sans text-[11px] font-medium tracking-wide transition-colors
+                      ${isHome ? "text-sage-800" : "text-stone-400 hover:text-stone-600"}`}
         >
-          <Images className={`w-6 h-6 ${isGallery ? "stroke-[2.5]" : ""}`} />
-          Galéria
+          <Info
+            className={`w-5 h-5 ${isHome ? "stroke-[2]" : "stroke-[1.5]"}`}
+          />
+          Info
         </Link>
 
-        {/* ── Upload — primary, centre ─────────────────────────────────── */}
+        {/* Nahrať — scrolls to upload section on homepage */}
         <Link
-          href="/"
-          className="flex flex-col items-center justify-center gap-0.5 px-6"
+          href="/#upload"
+          className="flex items-center justify-center px-4"
         >
           <span
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-2xl px-5 py-2
-                        transition-colors text-[11px] font-bold
+            className={`flex flex-col items-center justify-center gap-0.5 rounded-lg px-5 py-2
+                        font-sans text-[11px] font-semibold tracking-wide transition-all
                         ${isUpload
-                          ? "bg-sage-500 text-white shadow-lg shadow-sage-300"
-                          : "bg-sage-100 text-sage-700 hover:bg-sage-200"}`}
+                          ? "bg-sage-800 text-white shadow-lg shadow-sage-900/20"
+                          : "bg-sage-800 text-white shadow-md shadow-sage-900/15"}`}
           >
-            <Camera className="w-6 h-6" />
+            <Camera className="w-5 h-5" strokeWidth={1.5} />
             Nahrať
           </span>
         </Link>
 
-        {/* ── Info ────────────────────────────────────────────────────── */}
-        <button
-          onClick={handleInfo}
-          aria-label="Svadobné info"
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px]
-                     font-semibold text-gray-400 hover:text-gray-600 transition-colors"
+        {/* Galéria */}
+        <Link
+          href="/gallery"
+          className={`flex flex-1 flex-col items-center justify-center gap-0.5
+                      font-sans text-[11px] font-medium tracking-wide transition-colors
+                      ${isGallery ? "text-sage-800" : "text-stone-400 hover:text-stone-600"}`}
         >
-          <Info className="w-6 h-6" />
-          Info
-        </button>
+          <Images
+            className={`w-5 h-5 ${isGallery ? "stroke-[2]" : "stroke-[1.5]"}`}
+          />
+          Galéria
+        </Link>
 
       </div>
     </nav>

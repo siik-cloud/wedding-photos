@@ -4,36 +4,47 @@
 
 :root {
   --background: #faf9f7;
-  --foreground: #1a1a1a;
+  --foreground: #1c1917;
+  --surface: #ffffff;
+  --border: #e7e5e4;
+  --border-subtle: #f0ede9;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
-
-/* iOS safe-area support for sticky nav */
+/* iOS safe-area support for bottom nav */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
-/* Custom scrollbar for gallery */
+/* Scrollbar — gallery */
 .gallery-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 .gallery-scroll::-webkit-scrollbar-track {
-  background: #f1f5f4;
+  background: transparent;
 }
 .gallery-scroll::-webkit-scrollbar-thumb {
-  background: #a7c9a2;
-  border-radius: 3px;
+  background: #d6d3d1;
+  border-radius: 4px;
+}
+
+/* Progress bar animation */
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.progress-indeterminate {
+  animation: progress-indeterminate 1.4s ease infinite;
 }

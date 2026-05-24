@@ -8,18 +8,22 @@ export default async function AdminPage() {
   const authenticated = await isAdminAuthenticated();
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 py-4 px-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
+    <main className="min-h-screen bg-[#faf9f7]">
+      <div className="bg-white border-b border-stone-200 px-4">
+        <div className="max-w-5xl mx-auto h-14 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-gray-800">Admin panel</h1>
-            <p className="text-sm text-gray-500">Svadba Katky a Šimona</p>
+            <span className="font-sans text-sm font-semibold text-stone-900 tracking-tight">
+              Admin
+            </span>
+            <span className="font-sans text-stone-400 text-sm ml-2">Katka &amp; Šimon</span>
           </div>
           {authenticated && (
             <form action="/api/admin/logout" method="POST">
               <button
                 type="submit"
-                className="text-sm text-gray-500 hover:text-red-500 transition-colors px-3 py-1.5 border border-gray-200 rounded-lg"
+                className="font-sans text-xs font-medium text-stone-500 hover:text-stone-800
+                           tracking-[0.02em] transition-colors px-3 py-1.5 border border-stone-200
+                           rounded-lg hover:border-stone-300"
               >
                 Odhlásiť sa
               </button>
@@ -28,7 +32,7 @@ export default async function AdminPage() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-4 py-8 pb-24">
         {authenticated ? <AdminPanel /> : <AdminLogin />}
       </div>
     </main>
