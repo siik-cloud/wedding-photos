@@ -19,7 +19,7 @@ export default async function GalleryPage() {
             <h1 className="font-sans text-sm font-semibold text-stone-900 tracking-tight">
               Galéria
             </h1>
-            <p className="font-serif font-light text-xs text-stone-400 italic">
+            <p className="font-sans font-light text-xs text-stone-400 italic">
               Katka &amp; Šimon · 6. júna 2026
             </p>
           </div>
@@ -46,7 +46,7 @@ export default async function GalleryPage() {
                             justify-center mx-auto mb-6">
               <Lock className="w-5 h-5 text-sage-500" strokeWidth={1.5} />
             </div>
-            <h2 className="font-serif font-light text-2xl text-stone-900 tracking-tight mb-3">
+            <h2 className="font-sans font-light text-2xl text-stone-900 tracking-tight mb-3">
               Galéria nie je ešte dostupná
             </h2>
             <p className="font-sans text-stone-500 text-sm leading-relaxed mb-8">

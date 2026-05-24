@@ -66,8 +66,8 @@ export async function POST(req: NextRequest) {
     const fileName = storagePath.split("/").pop() ?? storagePath;
 
     // Insert record into uploads table
-    const { data: record, error: dbError } = await supabase
-      .from("uploads")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: record, error: dbError } = await (supabase.from("uploads") as any)
       .insert({
         file_name: fileName,
         original_file_name: originalFileName.slice(0, 500),
@@ -92,7 +92,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, id: record?.id });
+    const inserted = record as { id: string } | null;
+    return NextResponse.json({ success: true, id: inserted?.id });
   } catch (err) {
     console.error("[upload/confirm] Error:", err);
     return NextResponse.json({ error: "Interná chyba servera" }, { status: 500 });

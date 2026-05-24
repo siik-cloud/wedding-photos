@@ -17,6 +17,17 @@ import { getSupabaseServer, BUCKET_NAME } from "@/lib/supabase/server-client";
 
 export const dynamic = "force-dynamic";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CleanupRow {
+  id: string;
+  original_file_name: string;
+  file_size: number;
+  created_at: string;
+  is_test: boolean;
+  storage_path: string;
+}
+
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
 function getWeddingStart(): Date | null {
@@ -31,18 +42,16 @@ function buildCleanupQuery(
   supabase: ReturnType<typeof getSupabaseServer>,
   weddingStart: Date | null
 ) {
-  const base = supabase
-    .from("uploads")
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const base = (supabase.from("uploads") as any)
     .select("id, original_file_name, file_size, created_at, is_test, storage_path")
     .is("deleted_at", null);
 
   if (weddingStart) {
-    // Delete is_test files OR anything uploaded before the wedding started
     return base.or(
       `is_test.eq.true,created_at.lt.${weddingStart.toISOString()}`
     );
   }
-  // No timestamp configured — only delete explicitly-flagged test files
   return base.eq("is_test", true);
 }
 
@@ -60,7 +69,8 @@ export async function GET() {
     const { data, error } = await buildCleanupQuery(supabase, weddingStart);
     if (error) throw error;
 
-    const files = (data ?? []).map((f) => ({
+    const rows = (data ?? []) as CleanupRow[];
+    const files = rows.map((f) => ({
       id: f.id,
       name: f.original_file_name,
       size: f.file_size,
@@ -97,25 +107,25 @@ export async function DELETE() {
     );
     if (fetchErr) throw fetchErr;
 
-    if (!targets || targets.length === 0) {
+    const rows = (targets ?? []) as CleanupRow[];
+    if (rows.length === 0) {
       return NextResponse.json({ deleted: 0 });
     }
 
     // 2. Remove from storage (best-effort — don't abort if some files are missing)
-    const paths = targets.map((f) => f.storage_path);
+    const paths = rows.map((f) => f.storage_path);
     const { error: storageErr } = await supabase.storage
       .from(BUCKET_NAME)
       .remove(paths);
 
     if (storageErr) {
       console.warn("[admin/cleanup] Storage remove had errors:", storageErr);
-      // Continue with DB soft-delete regardless
     }
 
     // 3. Soft-delete in database
-    const ids = targets.map((f) => f.id);
-    const { error: dbErr } = await supabase
-      .from("uploads")
+    const ids = rows.map((f) => f.id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: dbErr } = await (supabase.from("uploads") as any)
       .update({ deleted_at: new Date().toISOString() })
       .in("id", ids);
 

@@ -61,9 +61,9 @@ function TimelineItem({
         {!last && <div className="w-px flex-1 bg-sage-100 mt-1 mb-0" />}
       </div>
       <div className={`${last ? "pb-0" : "pb-4"}`}>
-        <p className="font-serif font-medium text-stone-800 text-sm leading-snug">{label}</p>
+        <p className="font-sans font-medium text-stone-800 text-sm leading-snug">{label}</p>
         {description && (
-          <p className="font-serif text-stone-400 text-xs mt-0.5 leading-relaxed font-light">
+          <p className="font-sans text-stone-400 text-xs mt-0.5 leading-relaxed font-light">
             {description}
           </p>
         )}
@@ -79,7 +79,7 @@ function CourseRow({ course, dish }: { course: string; dish: string }) {
       <span className="font-sans text-xs text-stone-400 w-28 flex-shrink-0 pt-0.5 font-medium uppercase tracking-wide">
         {course}
       </span>
-      <span className="font-serif text-stone-700 text-sm leading-snug">{dish}</span>
+      <span className="font-sans text-stone-700 text-sm leading-snug">{dish}</span>
     </div>
   );
 }
@@ -91,7 +91,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="font-sans text-xs text-stone-400 w-28 flex-shrink-0 pt-0.5 font-medium uppercase tracking-wide">
         {label}
       </span>
-      <span className="font-serif text-stone-700 text-sm">{value}</span>
+      <span className="font-sans text-stone-700 text-sm">{value}</span>
     </div>
   );
 }
@@ -107,7 +107,7 @@ export default function WeddingInfo() {
         <h2 className="font-sans text-sm font-semibold text-stone-900 tracking-tight">
           Svadobné info
         </h2>
-        <p className="font-serif font-light text-stone-400 text-sm mt-0.5 italic">
+        <p className="font-sans font-light text-stone-400 text-sm mt-0.5 italic">
           Katka &amp; Šimon · 6. júna 2026
         </p>
       </div>
@@ -137,39 +137,8 @@ export default function WeddingInfo() {
           <CourseRow course="Dezert"       dish="Výber dezertov, čokoládová fontána" />
           <CourseRow course="Neskoro večer" dish="Polnočné občerstvenie" />
         </div>
-        <p className="font-sans text-xs text-stone-400 mt-3">
-          Vegetariánsku alternatívu nahláste obsluhe.
-        </p>
       </Section>
 
-      {/* Practical info */}
-      <Section icon={MapPin} title="Praktické informácie">
-        <div className="mt-1">
-          <InfoRow
-            label="Miesto"
-            value={
-              <a
-                href="https://maps.google.com/?q=Bratislava"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sage-700 underline underline-offset-2 hover:text-sage-900 transition-colors"
-              >
-                Reštaurácia Záhrada, Bratislava
-              </a>
-            }
-          />
-          <InfoRow label="Parkovanie" value="Bezplatné parkovisko pri sále" />
-          <InfoRow label="Dress code" value="Elegantné — odtiene zelenej vítané" />
-          <InfoRow
-            label="Kontakt"
-            value={
-              <a href="tel:+421900000000" className="text-sage-700 underline underline-offset-2">
-                +421 900 000 000
-              </a>
-            }
-          />
-        </div>
-      </Section>
     </section>
   );
 }

@@ -13,8 +13,8 @@ export async function GET() {
   try {
     const supabase = getSupabaseServer();
 
-    const { data, error } = await supabase
-      .from("settings")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.from("settings") as any)
       .select("key, value")
       .eq("key", "public_gallery_enabled")
       .single();
@@ -25,8 +25,10 @@ export async function GET() {
       return NextResponse.json({ error: "Chyba databázy" }, { status: 500 });
     }
 
+    const row = data as { key: string; value: boolean } | null;
+
     return NextResponse.json({
-      public_gallery_enabled: data?.value ?? false,
+      public_gallery_enabled: row?.value ?? false,
     });
   } catch (err) {
     console.error("[admin/settings] GET error:", err);
@@ -55,8 +57,8 @@ export async function PUT(req: NextRequest) {
 
     const supabase = getSupabaseServer();
 
-    // Upsert — create or update the setting
-    const { error } = await supabase.from("settings").upsert(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from("settings") as any).upsert(
       {
         key: "public_gallery_enabled",
         value: body.public_gallery_enabled,

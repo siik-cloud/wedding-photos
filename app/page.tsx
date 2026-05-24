@@ -11,11 +11,11 @@ export default function HomePage() {
         <p className="font-sans text-xs font-medium text-sage-600 tracking-[0.18em] uppercase mb-5">
           6. júna 2026
         </p>
-        <h1 className="font-serif font-light text-4xl sm:text-5xl text-stone-900 leading-[1.15] tracking-tight">
+        <h1 className="font-heading font-semibold text-4xl sm:text-[2.75rem] text-stone-900 leading-[1.1] tracking-tight">
           Fotky zo svadby
           <br />Katky&nbsp;&amp;&nbsp;Šimona
         </h1>
-        <p className="mt-4 font-serif font-light text-stone-500 text-lg sm:text-xl max-w-sm mx-auto leading-relaxed">
+        <p className="mt-4 text-stone-500 text-base sm:text-lg max-w-sm mx-auto leading-relaxed">
           Zachyť momenty a zdieľaj fotky zo svojho uhla pohľadu.
         </p>
 

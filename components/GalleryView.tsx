@@ -189,7 +189,7 @@ export default function GalleryView() {
                         mx-auto mb-5">
           <Inbox className="w-6 h-6 text-sage-500" strokeWidth={1.5} />
         </div>
-        <p className="font-serif text-stone-600 text-base">Galéria je zatiaľ prázdna.</p>
+        <p className="font-sans text-stone-600 text-base">Galéria je zatiaľ prázdna.</p>
         <p className="font-sans text-stone-400 text-xs mt-1">Buď prvý, kto nahráš fotku.</p>
       </div>
     );
@@ -440,7 +440,7 @@ export default function GalleryView() {
                 {currentFile.guest_name && (
                   <>
                     <User className="w-3.5 h-3.5 text-white/40 flex-shrink-0" strokeWidth={1.5} />
-                    <span className="font-serif text-white/80 truncate">
+                    <span className="font-sans text-white/80 truncate">
                       {currentFile.guest_name}
                     </span>
                     <span className="text-white/30 flex-shrink-0 mx-0.5">·</span>

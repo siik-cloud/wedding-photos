@@ -1,22 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Cormorant_Garamond } from "next/font/google";
 import "./globals.css";
 import MobileNav from "@/components/MobileNav";
-
-const inter = Inter({
-  subsets: ["latin", "latin-ext"],
-  display: "swap",
-  variable: "--font-inter",
-});
-
-// Used for editorial / wedding copy — not for UI or buttons
-const cormorant = Cormorant_Garamond({
-  subsets: ["latin", "latin-ext"],
-  display: "swap",
-  variable: "--font-cormorant",
-  weight: ["300", "400", "500", "600"],
-  style: ["normal", "italic"],
-});
+import { inter, cormorant } from "@/lib/fonts";
 
 export const viewport: Viewport = {
   viewportFit: "cover",
@@ -34,8 +19,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
+    /*
+     * Both CSS variables must be on <html> so they're available to every
+     * descendant. The `font-sans` class on <body> ensures Inter is the
+     * baseline for all text — Cormorant is opt-in via `font-heading`.
+     */
     <html lang="sk" className={`${inter.variable} ${cormorant.variable}`}>
-      <body className="min-h-screen bg-[#faf9f7] text-stone-900 antialiased">
+      <body className="font-sans min-h-screen bg-[#faf9f7] text-stone-900 antialiased">
         {children}
         <MobileNav />
       </body>

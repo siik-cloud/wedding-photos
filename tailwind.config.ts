@@ -9,8 +9,10 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans:  ["var(--font-inter)",     "system-ui", "sans-serif"],
-        serif: ["var(--font-cormorant)", "Georgia",   "serif"],
+        // Inter — body, buttons, nav, forms, all UI
+        sans:    ["var(--font-inter)", "system-ui", "sans-serif"],
+        // Cormorant Garamond — hero title only
+        heading: ["var(--font-cormorant)", "Georgia", "serif"],
       },
       colors: {
         sage: {
