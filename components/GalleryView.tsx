@@ -19,8 +19,14 @@ import type { UploadWithUrl } from "@/types";
 import {
   isMobileDevice,
   shareFileFromUrl,
+  downloadFileAsBlob,
   downloadSingleFile,
-  downloadFilesSequentially,
+  downloadAsZip,
+  ZIP_FILENAME,
+  DESKTOP_ZIP_WARN_BYTES,
+  MOBILE_ZIP_MAX_BYTES,
+  MOBILE_ZIP_MAX_FILES,
+  type ZipPhase,
   type DownloadState,
   type DownloadProgress,
 } from "@/lib/downloadUtils";
@@ -56,9 +62,13 @@ export default function GalleryView() {
   // Download state
   const [downloadState, setDownloadState]       = useState<DownloadState>("idle");
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
+  const [zipPhase, setZipPhase]                 = useState<ZipPhase | null>(null);
   const [showFallback, setShowFallback]         = useState(false);
   const [fallbackFiles, setFallbackFiles]       = useState<UploadWithUrl[]>([]);
-  const [downloadResult, setDownloadResult]     = useState<{ success: number; failed: number } | null>(null);
+  // limitMsg is set instead of success/failed when a size/count limit blocks the download.
+  const [downloadResult, setDownloadResult]     = useState<{
+    success: number; failed: number; limitMsg?: string;
+  } | null>(null);
 
   // Mobile detection (used for button labels and bulk-download warning)
   const [isMobile, setIsMobile] = useState(false);
@@ -288,12 +298,14 @@ export default function GalleryView() {
           file.mime_type
         );
         // "cancelled" — user dismissed the sheet, nothing more to do.
-        // "not-supported" / "error" — fall through to blob download.
+        // "not-supported" / "error" — fall back to blob download.
         if (res === "not-supported" || res === "error") {
+          // On mobile, allow window.open as last resort so the user still gets the file.
           downloadSingleFile(downloadUrl, file.original_file_name);
         }
       } else {
-        downloadSingleFile(downloadUrl, file.original_file_name);
+        // Desktop: pure blob download — never opens the raw Supabase URL.
+        await downloadFileAsBlob(downloadUrl, file.original_file_name);
       }
     } finally {
       setSavingId(null);
@@ -324,14 +336,11 @@ export default function GalleryView() {
     }
   }, [goNext, goPrev]);
 
-  // ── Bulk download ───────────────────────────────────────────────────────────
+  // ── Bulk download via ZIP ──────────────────────────────────────────────────
   //
-  // Strategy: fetch each file as a Blob → same-origin object URL → anchor click.
-  // The `download` attribute is IGNORED by Chrome for cross-origin hrefs (Supabase
-  // URLs) but IS honoured for blob: URLs, which are always same-origin.
-  //
-  // Files are downloaded one at a time with a 600 ms delay to prevent the
-  // browser's popup-blocker from killing subsequent downloads.
+  // Sequential programmatic anchor clicks are blocked by every major browser
+  // after the first one (popup-blocker heuristic). Packing files into a single
+  // ZIP and triggering one download is the only reliable cross-browser solution.
 
   const downloadSelected = async () => {
     const toDownload = files.filter((f) => selectedIds.has(f.id));
@@ -341,9 +350,9 @@ export default function GalleryView() {
     setShowFallback(false);
     setFallbackFiles([]);
     setDownloadResult(null);
+    setZipPhase(null);
 
-    // Pre-fetch original signed URLs for selected items whose downloadUrl="" (thumbnail-only).
-    // We write directly into fetchedUrlsRef so we can read the results synchronously below.
+    // Pre-fetch original signed URLs for images-with-thumbnails (url="" in gallery API).
     const missingUrl = toDownload.filter(
       (f) => !f.downloadUrl && !fetchedUrlsRef.current.has(f.id)
     );
@@ -356,43 +365,71 @@ export default function GalleryView() {
               const data = await res.json() as { url?: string };
               if (data.url) fetchedUrlsRef.current.set(f.id, data.url);
             }
-          } catch { /* ignore — these files will appear in the failed list */ }
+          } catch { /* ignore — file will appear in failed list */ }
         })
       );
     }
 
-    // Build resolved list: substitute fetched URLs where downloadUrl was empty.
+    // Build resolved list with original URLs substituted where needed.
     const resolved = toDownload
       .map((f) => ({
         ...f,
         url:         f.url         || fetchedUrlsRef.current.get(f.id) || "",
         downloadUrl: f.downloadUrl || fetchedUrlsRef.current.get(f.id) || "",
       }))
-      .filter((f) => !!f.downloadUrl); // skip files whose URL we couldn't obtain
+      .filter((f) => !!f.downloadUrl);
 
     if (resolved.length === 0) {
       setDownloadState("idle");
       return;
     }
 
-    await new Promise<void>((r) => setTimeout(r, 400));
+    // ── Size / count limits ────────────────────────────────────────────────────
+    const totalBytes = resolved.reduce((sum, f) => sum + (f.file_size ?? 0), 0);
 
+    if (isMobile && resolved.length > MOBILE_ZIP_MAX_FILES) {
+      setDownloadResult({
+        success: 0, failed: 0,
+        limitMsg: "Hromadné sťahovanie na mobile môže byť obmedzené. Vyber menej súborov, stiahni ich jednotlivo, alebo použi počítač.",
+      });
+      setDownloadState("done");
+      return;
+    }
+    if (isMobile && totalBytes > MOBILE_ZIP_MAX_BYTES) {
+      setDownloadResult({
+        success: 0, failed: 0,
+        limitMsg: "Hromadné sťahovanie na mobile môže byť obmedzené. Vyber menej súborov, stiahni ich jednotlivo, alebo použi počítač.",
+      });
+      setDownloadState("done");
+      return;
+    }
+    if (totalBytes > DESKTOP_ZIP_WARN_BYTES) {
+      setDownloadResult({
+        success: 0, failed: 0,
+        limitMsg: "Výber je príliš veľký na ZIP. Stiahni súbory po menších častiach.",
+      });
+      setDownloadState("done");
+      return;
+    }
+
+    // ── ZIP download ───────────────────────────────────────────────────────────
     setDownloadState("downloading");
     setDownloadProgress({ current: 0, total: resolved.length });
 
-    const failed = await downloadFilesSequentially(
+    const { added, failedFiles } = await downloadAsZip(
       resolved,
-      600,
-      (current, total) => setDownloadProgress({ current, total })
+      ZIP_FILENAME,
+      (p) => {
+        setZipPhase(p.phase);
+        setDownloadProgress({ current: p.current, total: p.total });
+      }
     );
 
-    const successCount = resolved.length - failed.length;
-    setDownloadResult({ success: successCount, failed: failed.length });
+    setDownloadResult({ success: added, failed: failedFiles.length });
     setDownloadState("done");
 
-    // Only show the fallback panel when files actually failed
-    if (failed.length > 0) {
-      setFallbackFiles(failed);
+    if (failedFiles.length > 0) {
+      setFallbackFiles(failedFiles);
       setShowFallback(true);
     }
   };
@@ -493,21 +530,27 @@ export default function GalleryView() {
             {downloadState === "preparing" && (
               <span className="font-sans text-sm text-stone-500 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-                Pripravujem sťahovanie…
+                Pripravujem ZIP…
               </span>
             )}
             {downloadState === "downloading" && (
               <span className="font-sans text-sm text-stone-700 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-                Sťahujem súbor&nbsp;{downloadProgress.current}&nbsp;z&nbsp;{downloadProgress.total}…
+                {zipPhase === "generating"
+                  ? "Sťahujem ZIP…"
+                  : `Pridávam súbor ${downloadProgress.current} z ${downloadProgress.total}…`}
               </span>
             )}
             {downloadState === "done" && (
-              <span className="font-sans text-sm text-sage-700 flex items-center gap-2">
-                <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
-                {downloadResult
-                  ? `Stiahnuté: ${downloadResult.success}${downloadResult.failed > 0 ? ` · Nepodarilo sa: ${downloadResult.failed}` : ""}`
-                  : "Sťahovanie dokončené."}
+              <span className={`font-sans text-sm flex items-center gap-2
+                               ${downloadResult?.limitMsg ? "text-amber-700" : "text-sage-700"}`}>
+                {downloadResult?.limitMsg
+                  ? <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
+                  : <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />}
+                {downloadResult?.limitMsg
+                  ?? (downloadResult
+                      ? `Pridané do ZIP: ${downloadResult.success}${downloadResult.failed > 0 ? ` · Nepodarilo sa: ${downloadResult.failed}` : ""}`
+                      : "Sťahovanie dokončené.")}
               </span>
             )}
           </div>
@@ -545,17 +588,6 @@ export default function GalleryView() {
             </button>
           )}
 
-          {/* Mobile bulk-download warning */}
-          {isMobile && selectedCount > 1 && downloadState === "idle" && (
-            <div className="basis-full flex items-start gap-2 pt-1">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sage-500"
-                           strokeWidth={1.5} />
-              <p className="font-sans text-xs text-stone-500 leading-relaxed">
-                Hromadné sťahovanie môže telefón uložiť do Súborov. Pre uloženie priamo
-                do galérie odporúčame ukladať fotky jednotlivo.
-              </p>
-            </div>
-          )}
         </div>
       )}
 

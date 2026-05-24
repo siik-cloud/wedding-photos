@@ -24,8 +24,13 @@ import {
 import type { UploadWithUrl, AdminStats } from "@/types";
 import {
   isMobileDevice,
-  downloadSingleFile,
-  downloadFilesSequentially,
+  downloadFileAsBlob,
+  downloadAsZip,
+  ZIP_FILENAME,
+  DESKTOP_ZIP_WARN_BYTES,
+  MOBILE_ZIP_MAX_BYTES,
+  MOBILE_ZIP_MAX_FILES,
+  type ZipPhase,
   type DownloadState,
   type DownloadProgress,
 } from "@/lib/downloadUtils";
@@ -194,7 +199,8 @@ function BulkActionBar({
   downloadState,
   downloadProgress,
   downloadFailed,
-  isMobile,
+  zipPhase,
+  limitMsg,
 }: {
   count: number;
   onDelete: () => void;
@@ -204,7 +210,8 @@ function BulkActionBar({
   downloadState: DownloadState;
   downloadProgress: DownloadProgress;
   downloadFailed: number;
-  isMobile: boolean;
+  zipPhase?: ZipPhase | null;
+  limitMsg?: string;
 }) {
   if (count === 0) return null;
 
@@ -223,22 +230,27 @@ function BulkActionBar({
         {downloadState === "preparing" && (
           <span className="font-sans text-sm text-stone-500 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-            Pripravujem sťahovanie…
+            Pripravujem ZIP…
           </span>
         )}
         {downloadState === "downloading" && (
           <span className="font-sans text-sm text-stone-700 flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-sage-500 flex-shrink-0" />
-            Sťahujem súbor&nbsp;{downloadProgress.current}&nbsp;z&nbsp;{downloadProgress.total}…
+            {zipPhase === "generating"
+              ? "Sťahujem ZIP…"
+              : `Pridávam súbor ${downloadProgress.current} z ${downloadProgress.total}…`}
           </span>
         )}
         {downloadState === "done" && (
           <span className={`font-sans text-sm flex items-center gap-2
-                            ${downloadFailed > 0 ? "text-amber-700" : "text-sage-700"}`}>
-            <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
-            {downloadFailed > 0
-              ? `Dokončené · ${downloadFailed} nepodarilo sa`
-              : "Sťahovanie dokončené."}
+                            ${limitMsg || downloadFailed > 0 ? "text-amber-700" : "text-sage-700"}`}>
+            {limitMsg
+              ? <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
+              : <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />}
+            {limitMsg
+              ?? (downloadFailed > 0
+                  ? `Dokončené · ${downloadFailed} nepodarilo sa`
+                  : "Sťahovanie dokončené.")}
           </span>
         )}
       </div>
@@ -284,18 +296,6 @@ function BulkActionBar({
       >
         Zrušiť
       </button>
-
-      {/* Mobile bulk-download warning */}
-      {isMobile && count > 1 && downloadState === "idle" && (
-        <div className="basis-full flex items-start gap-2 pt-0.5">
-          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sage-500"
-                       strokeWidth={1.5} />
-          <p className="font-sans text-xs text-stone-500 leading-relaxed">
-            Hromadné sťahovanie môže telefón uložiť do Súborov. Pre uloženie priamo
-            do galérie odporúčame ukladať fotky jednotlivo.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
@@ -639,7 +639,8 @@ export default function AdminPanel() {
   const [dlState, setDlState]       = useState<DownloadState>("idle");
   const [dlProgress, setDlProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
   const [dlFailed, setDlFailed]     = useState<AdminFile[]>([]);
-  const [dlTotal, setDlTotal]       = useState(0);
+  const [dlZipPhase, setDlZipPhase] = useState<ZipPhase | null>(null);
+  const [dlLimitMsg, setDlLimitMsg] = useState<string>("");
 
   // Mobile save modal
   const [isMobile, setIsMobile]     = useState(false);
@@ -657,7 +658,8 @@ export default function AdminPanel() {
     if (isMobile) {
       setMobileFile(file);
     } else {
-      downloadSingleFile(file.downloadUrl, file.original_file_name);
+      // Desktop: pure blob download — never opens the raw Supabase URL.
+      downloadFileAsBlob(file.downloadUrl, file.original_file_name);
     }
   }, [isMobile]);
 
@@ -779,7 +781,11 @@ export default function AdminPanel() {
     }
   };
 
-  // ── Bulk download ─────────────────────────────────────────────────────────
+  // ── Bulk download via ZIP ─────────────────────────────────────────────────
+  //
+  // Sequential programmatic anchor clicks are blocked by every major browser
+  // after the first one (popup-blocker heuristic). Packing files into a single
+  // ZIP and triggering one download is the only reliable cross-browser solution.
 
   const bulkDownload = async () => {
     const toDownload = files.filter((f) => selectedIds.has(f.id));
@@ -787,24 +793,43 @@ export default function AdminPanel() {
 
     setDlState("preparing");
     setDlFailed([]);
-    setDlTotal(toDownload.length);
-    await new Promise<void>((r) => setTimeout(r, 400));
+    setDlLimitMsg("");
+    setDlZipPhase(null);
 
+    // ── Size / count limits ────────────────────────────────────────────────────
+    const totalBytes = toDownload.reduce((sum, f) => sum + (f.file_size ?? 0), 0);
+
+    if (isMobile && toDownload.length > MOBILE_ZIP_MAX_FILES) {
+      setDlLimitMsg("Hromadné sťahovanie na mobile môže byť obmedzené. Vyber menej súborov, stiahni ich jednotlivo, alebo použi počítač.");
+      setDlState("done");
+      return;
+    }
+    if (isMobile && totalBytes > MOBILE_ZIP_MAX_BYTES) {
+      setDlLimitMsg("Hromadné sťahovanie na mobile môže byť obmedzené. Vyber menej súborov, stiahni ich jednotlivo, alebo použi počítač.");
+      setDlState("done");
+      return;
+    }
+    if (totalBytes > DESKTOP_ZIP_WARN_BYTES) {
+      setDlLimitMsg("Výber je príliš veľký na ZIP. Stiahni súbory po menších častiach.");
+      setDlState("done");
+      return;
+    }
+
+    // ── ZIP download ───────────────────────────────────────────────────────────
     setDlState("downloading");
     setDlProgress({ current: 0, total: toDownload.length });
 
-    const failed = await downloadFilesSequentially(
+    const { failedFiles } = await downloadAsZip(
       toDownload,
-      600,
-      (current, total) => setDlProgress({ current, total })
+      ZIP_FILENAME,
+      (p) => {
+        setDlZipPhase(p.phase);
+        setDlProgress({ current: p.current, total: p.total });
+      }
     );
 
-    setDlFailed(failed);
+    setDlFailed(failedFiles);
     setDlState("done");
-    // Auto-reset the "done" chip only when everything succeeded
-    if (failed.length === 0) {
-      setTimeout(() => setDlState("idle"), 4000);
-    }
   };
 
   // ── Bulk delete — show modal ──────────────────────────────────────────────
@@ -1113,23 +1138,28 @@ export default function AdminPanel() {
               count={selectedIds.size}
               onDelete={bulkDelete}
               onDownload={bulkDownload}
-              onClear={() => { clearSelection(); setDlState("idle"); setDlFailed([]); setDlTotal(0); setLoadMoreError(""); }}
+              onClear={() => {
+                clearSelection();
+                setDlState("idle");
+                setDlFailed([]);
+                setDlZipPhase(null);
+                setDlLimitMsg("");
+              }}
               isDeleting={bulkDeleting}
               downloadState={dlState}
               downloadProgress={dlProgress}
               downloadFailed={dlFailed.length}
-              isMobile={isMobile}
+              zipPhase={dlZipPhase}
+              limitMsg={dlLimitMsg}
             />
 
-            {/* Download fallback panel — shown when some files couldn't be blob-downloaded */}
+            {/* Download fallback panel — shown when some files couldn't be added to the ZIP */}
             {dlFailed.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-sans text-sm font-semibold text-amber-800">
-                      {dlFailed.length === dlTotal
-                        ? "Prehliadač zablokoval hromadné sťahovanie."
-                        : `${dlFailed.length} súborov sa nepodarilo stiahnuť.`}
+                      {dlFailed.length} súborov sa nepodarilo pridať do ZIP.
                     </p>
                     <p className="font-sans text-xs text-amber-700 mt-0.5">
                       Stiahni ich jednotlivo cez tieto tlačidlá:
@@ -1149,7 +1179,7 @@ export default function AdminPanel() {
                     <button
                       key={f.id}
                       type="button"
-                      onClick={() => downloadSingleFile(f.downloadUrl, f.original_file_name)}
+                      onClick={() => downloadFileAsBlob(f.downloadUrl, f.original_file_name)}
                       className="w-full flex items-center gap-2.5 px-3 py-2.5 bg-white
                                  border border-amber-100 rounded-xl font-sans text-sm text-stone-700
                                  hover:border-sage-300 hover:text-sage-800 transition-colors

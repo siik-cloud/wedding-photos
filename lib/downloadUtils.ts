@@ -1,17 +1,28 @@
 /**
- * Bulk download utilities.
+ * Download utilities for single files and ZIP bundles.
  *
- * The `download` HTML attribute is silently ignored for cross-origin URLs in
- * Chrome/Edge — the browser previews the file instead of saving it.
- * To force a real download we fetch the file as a Blob first, create a
- * same-origin object URL from it, and trigger the anchor click from there.
- * Blob URLs ARE same-origin, so the `download` attribute is honoured.
+ * Single files
+ * ─────────────
+ * `downloadFileAsBlob` — fetch → Blob → same-origin object URL → anchor click.
+ * The `download` attribute is silently ignored for cross-origin URLs in Chrome/Edge
+ * but IS honoured for blob: URLs (always same-origin), so this is required to force
+ * the browser to save rather than preview.
  *
- * Supabase Storage returns permissive CORS headers (Access-Control-Allow-Origin: *)
- * so `fetch()` works from any front-end origin.
+ * `downloadSingleFile` — wraps `downloadFileAsBlob` and falls back to `window.open`
+ * only for the fallback link buttons in the UI (user-initiated, last-resort).
+ * The primary action buttons call `downloadFileAsBlob` directly to avoid ever
+ * opening the raw Supabase URL.
+ *
+ * ZIP bundles
+ * ─────────────
+ * Sequential programmatic anchor clicks are blocked by every major browser after the
+ * first one (popup-blocker heuristic).  Packing selected files into a single ZIP and
+ * triggering one download is the only reliable cross-browser solution.
+ *
+ * JSZip is loaded dynamically so it stays out of the initial bundle.
  */
 
-// ─── Mobile detection ────────────────────────────────────────────────────────
+// ─── Mobile detection ─────────────────────────────────────────────────────────
 
 /** Returns `true` when running on a phone or tablet. Safe in SSR (returns `false`). */
 export function isMobileDevice(): boolean {
@@ -30,12 +41,6 @@ export type ShareResult = "shared" | "cancelled" | "not-supported" | "error";
  * IMPORTANT: call this directly inside a button-click handler.
  * Modern Safari (iOS 15+) allows the intermediate `await fetch()` because the
  * entire call chain originates from a trusted user activation.
- *
- * Returns:
- *   "shared"        — share sheet opened (user may still cancel inside it)
- *   "cancelled"     — user dismissed the sheet
- *   "not-supported" — browser doesn't support file sharing
- *   "error"         — network or unexpected error
  */
 export async function shareFileFromUrl(
   url: string,
@@ -62,37 +67,23 @@ export async function shareFileFromUrl(
   }
 }
 
-// ─── Download state ───────────────────────────────────────────────────────────
+// ─── Download state (shared by GalleryView + AdminPanel UI) ──────────────────
 
 export type DownloadState = "idle" | "preparing" | "downloading" | "done";
 
-/**
- * Downloads a single file via Blob and triggers a native save dialog.
- *
- * If the Blob fetch fails (e.g. very large video exhausting available memory,
- * or a transient network error) the file is opened in a new tab so the user
- * can still save it manually.  The caller page is never navigated away from.
- *
- * Returns `true` when the Blob path succeeded, `false` when the new-tab
- * fallback was used instead.
- */
-export async function downloadSingleFile(url: string, filename: string): Promise<boolean> {
-  const ok = await downloadFileAsBlob(url, filename);
-  if (!ok) {
-    // Fallback: open in a new tab — user can long-press / right-click → Save
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-  return ok;
-}
-
 export interface DownloadProgress {
   current: number;
-  total: number;
+  total:   number;
 }
+
+// ─── Single-file blob download ────────────────────────────────────────────────
 
 /**
  * Fetches one file as a Blob and triggers a native save-file dialog.
- * Returns `true` on success, `false` on any network / browser error.
+ * Returns `true` on success, `false` on any network / memory error.
+ *
+ * Use this as the PRIMARY action for download buttons — it never opens the
+ * raw signed URL in a new tab.
  */
 export async function downloadFileAsBlob(
   url: string,
@@ -102,10 +93,10 @@ export async function downloadFileAsBlob(
     const res = await fetch(url, { mode: "cors" });
     if (!res.ok) return false;
 
-    const blob   = await res.blob();
+    const blob    = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
+    const a    = document.createElement("a");
     a.href     = blobUrl;
     a.download = filename;
     document.body.appendChild(a);
@@ -124,28 +115,101 @@ export async function downloadFileAsBlob(
 }
 
 /**
- * Downloads a list of files sequentially, with `delayMs` between each one.
- * Calls `onProgress(current, total)` before each download starts.
- * Returns the subset of files whose download failed.
+ * Same as `downloadFileAsBlob` but falls back to `window.open` when the Blob
+ * path fails (e.g. very large video, memory exhaustion).
+ *
+ * Use only for FALLBACK LINK BUTTONS in the UI (user explicitly clicked a link
+ * after a bulk-download error).  Do NOT use for primary action buttons.
  */
-export async function downloadFilesSequentially<
+export async function downloadSingleFile(url: string, filename: string): Promise<boolean> {
+  const ok = await downloadFileAsBlob(url, filename);
+  if (!ok) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+  return ok;
+}
+
+// ─── ZIP bulk download ────────────────────────────────────────────────────────
+
+/** ZIP download filename shown to the user. */
+export const ZIP_FILENAME = "katka-simon-fotky.zip";
+
+/** Desktop: warn when total selection exceeds this before zipping. */
+export const DESKTOP_ZIP_WARN_BYTES = 500 * 1024 * 1024;   // 500 MB
+
+/** Mobile: refuse ZIP when total exceeds this. */
+export const MOBILE_ZIP_MAX_BYTES = 100 * 1024 * 1024;     // 100 MB
+
+/** Mobile: refuse ZIP when file count exceeds this. */
+export const MOBILE_ZIP_MAX_FILES = 30;
+
+export type ZipPhase = "fetching" | "generating";
+
+export interface ZipProgress {
+  phase:   ZipPhase;
+  /** How many files have been fetched so far (fetching phase) or total (generating). */
+  current: number;
+  total:   number;
+}
+
+/** Appends ` (1)`, ` (2)`, … to prevent silent overwrites inside the ZIP. */
+function makeUniqueFilename(name: string, seen: Set<string>): string {
+  if (!seen.has(name)) { seen.add(name); return name; }
+  const dot  = name.lastIndexOf(".");
+  const base = dot >= 0 ? name.slice(0, dot) : name;
+  const ext  = dot >= 0 ? name.slice(dot)    : "";
+  let i = 1;
+  let candidate: string;
+  do { candidate = `${base} (${i++})${ext}`; } while (seen.has(candidate));
+  seen.add(candidate);
+  return candidate;
+}
+
+/**
+ * Fetches every file, packs them into a ZIP, and triggers one download.
+ * Files that fail to fetch are skipped and returned in `failedFiles`.
+ * Progress callbacks fire before each fetch and before ZIP generation.
+ */
+export async function downloadAsZip<
   T extends { downloadUrl: string; original_file_name: string }
 >(
-  files: T[],
-  delayMs: number,
-  onProgress: (current: number, total: number) => void
-): Promise<T[]> {
-  const failed: T[] = [];
+  files:      T[],
+  zipName:    string,
+  onProgress: (p: ZipProgress) => void
+): Promise<{ added: number; failed: number; failedFiles: T[] }> {
+  // Dynamic import keeps JSZip (~100 KB) out of the initial page bundle.
+  const JSZip = (await import("jszip")).default;
+  const zip   = new JSZip();
+  const seen  = new Set<string>();
+  let added   = 0;
+  const failedFiles: T[] = [];
 
+  // Phase 1 — fetch each file and add to ZIP
   for (let i = 0; i < files.length; i++) {
-    onProgress(i + 1, files.length);
-    const ok = await downloadFileAsBlob(files[i].downloadUrl, files[i].original_file_name);
-    if (!ok) failed.push(files[i]);
-
-    if (i < files.length - 1) {
-      await new Promise<void>((r) => setTimeout(r, delayMs));
+    onProgress({ phase: "fetching", current: i + 1, total: files.length });
+    const f = files[i];
+    try {
+      const res = await fetch(f.downloadUrl, { mode: "cors" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      zip.file(makeUniqueFilename(f.original_file_name, seen), blob);
+      added++;
+    } catch {
+      failedFiles.push(f);
     }
   }
 
-  return failed;
+  // Phase 2 — compress and trigger one download
+  onProgress({ phase: "generating", current: files.length, total: files.length });
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+
+  const blobUrl = URL.createObjectURL(zipBlob);
+  const a       = document.createElement("a");
+  a.href        = blobUrl;
+  a.download    = zipName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 400);
+
+  return { added, failed: failedFiles.length, failedFiles };
 }
