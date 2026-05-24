@@ -43,6 +43,12 @@ export default function GalleryView() {
   const [error, setError]               = useState("");
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
+  // Pagination
+  const [page, setPage]           = useState(0);
+  const [hasMore, setHasMore]     = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState("");
+
   // Selection state
   const [selecting, setSelecting]       = useState(false);
   const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
@@ -67,26 +73,42 @@ export default function GalleryView() {
   const swipeTouchStartX = useRef<number | null>(null);
   const swipeTouchStartY = useRef<number | null>(null);
 
-  useEffect(() => { fetchGallery(); }, []);
-  useEffect(() => { setIsMobile(isMobileDevice()); }, []);
-
-  const fetchGallery = async () => {
-    setLoading(true);
-    setError("");
+  const fetchGallery = useCallback(async (pageNum: number) => {
+    if (pageNum === 0) {
+      setLoading(true);
+      setError("");
+      setLoadMoreError("");
+    } else {
+      setLoadingMore(true);
+      setLoadMoreError("");
+    }
     try {
-      const res = await fetch("/api/gallery");
+      const res = await fetch(`/api/gallery?page=${pageNum}`);
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error || "Chyba pri načítaní galérie");
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Chyba pri načítaní galérie");
       }
       const data = await res.json();
-      setFiles(data.files ?? []);
+      const incoming: UploadWithUrl[] = data.files ?? [];
+      if (pageNum === 0) {
+        setFiles(incoming);
+      } else {
+        setFiles((prev) => [...prev, ...incoming]);
+      }
+      setHasMore(data.hasMore ?? false);
+      setPage(pageNum);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nastala chyba");
+      const msg = err instanceof Error ? err.message : "Nastala chyba";
+      if (pageNum === 0) setError(msg);
+      else setLoadMoreError(msg);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { fetchGallery(0); }, [fetchGallery]);
+  useEffect(() => { setIsMobile(isMobileDevice()); }, []);
 
   // ── Lightbox ────────────────────────────────────────────────────────────────
 
@@ -281,7 +303,7 @@ export default function GalleryView() {
       <div className="text-center py-20">
         <p className="font-sans text-red-500 text-sm mb-4">{error}</p>
         <button
-          onClick={fetchGallery}
+          onClick={() => fetchGallery(0)}
           className="px-4 py-2 bg-stone-100 text-stone-700 rounded-lg font-sans text-sm
                      hover:bg-stone-200 transition-colors font-medium"
         >
@@ -497,6 +519,28 @@ export default function GalleryView() {
           />
         ))}
       </div>
+
+      {/* ── Load more ─────────────────────────────────────────────────────────── */}
+      {(hasMore || loadMoreError) && (
+        <div className="flex flex-col items-center gap-2 mt-6">
+          {loadMoreError && (
+            <p className="font-sans text-xs text-red-500">{loadMoreError}</p>
+          )}
+          <button
+            onClick={() => fetchGallery(page + 1)}
+            disabled={loadingMore}
+            className="flex items-center gap-2 px-6 py-2.5 border border-stone-200
+                       rounded-xl font-sans text-sm font-medium text-stone-600
+                       hover:bg-stone-50 hover:border-stone-300 transition-colors
+                       disabled:opacity-50"
+          >
+            {loadingMore && (
+              <Loader2 className="w-4 h-4 animate-spin text-stone-400" />
+            )}
+            {loadingMore ? "Načítava sa…" : "Načítať ďalšie"}
+          </button>
+        </div>
+      )}
 
       {/* ── Lightbox ──────────────────────────────────────────────────────────── */}
       {currentFile && lightboxIndex !== null && (

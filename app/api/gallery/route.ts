@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   getSupabaseServer,
   BUCKET_NAME,
@@ -8,10 +8,11 @@ import type { Upload, UploadWithUrl } from "@/types";
 
 // Gallery signed URLs expire after 2 hours
 const SIGNED_URL_EXPIRY = 2 * 60 * 60;
+const PAGE_SIZE = 40;
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     // Check gallery is enabled
     const enabled = await isGalleryEnabled();
@@ -22,20 +23,28 @@ export async function GET() {
       );
     }
 
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(0, parseInt(searchParams.get("page") ?? "0", 10) || 0);
+    const from = page * PAGE_SIZE;
+    const to   = from + PAGE_SIZE - 1;
+
     const supabase = getSupabaseServer();
 
-    // Fetch all non-deleted uploads.
-    // Try to include thumbnail_path (requires DB migration); fall back without it
-    // so existing installs keep working before the migration is applied.
+    // Fetch one page of uploads.
+    // Try to include thumbnail_path; fall back without it on column-missing (42703).
     let uploads: Upload[] = [];
+    let totalCount = 0;
+
     {
       const withThumb = await supabase
         .from("uploads")
         .select(
-          "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at, thumbnail_path"
+          "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at, thumbnail_path",
+          { count: "exact" }
         )
         .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
       if (withThumb.error?.code === "42703") {
         // thumbnail_path column does not exist yet — run the migration:
@@ -44,32 +53,36 @@ export async function GET() {
         const noThumb = await supabase
           .from("uploads")
           .select(
-            "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at"
+            "id, file_name, original_file_name, file_type, mime_type, file_size, storage_path, guest_name, created_at",
+            { count: "exact" }
           )
           .is("deleted_at", null)
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .range(from, to);
 
         if (noThumb.error) {
           console.error("[gallery] DB error:", noThumb.error);
           return NextResponse.json({ error: "Chyba pri načítaní galérie" }, { status: 500 });
         }
-        // Cast: thumbnail_path will be undefined — treat as null downstream
-        uploads = (noThumb.data ?? []) as Upload[];
+        uploads    = (noThumb.data ?? []) as Upload[];
+        totalCount = noThumb.count ?? 0;
       } else if (withThumb.error) {
         console.error("[gallery] DB error:", withThumb.error);
         return NextResponse.json({ error: "Chyba pri načítaní galérie" }, { status: 500 });
       } else {
-        uploads = (withThumb.data ?? []) as Upload[];
+        uploads    = (withThumb.data ?? []) as Upload[];
+        totalCount = withThumb.count ?? 0;
       }
     }
 
+    // Are there more pages after this one?
+    const hasMore = from + uploads.length < totalCount;
+
     if (uploads.length === 0) {
-      return NextResponse.json({ files: [] });
+      return NextResponse.json({ files: [], hasMore: false });
     }
 
-    // Collect all storage paths that need signing:
-    //   - the main upload file (always)
-    //   - the thumbnail JPEG (only for videos with a pre-generated thumbnail)
+    // Collect all storage paths that need signing
     const thumbPaths = uploads
       .filter((u) => u.thumbnail_path)
       .map((u) => u.thumbnail_path as string);
@@ -96,9 +109,7 @@ export async function GET() {
       }
     }
 
-    // Merge uploads with their signed URLs.
-    // Build each entry as UploadWithUrl directly so TypeScript sees the correct
-    // optional type for thumbnailUrl (?: string) instead of (: string | undefined).
+    // Merge uploads with their signed URLs
     const filesWithUrls: UploadWithUrl[] = uploads
       .map((upload) => {
         const url = urlMap.get(upload.storage_path);
@@ -112,7 +123,7 @@ export async function GET() {
       })
       .filter((f): f is UploadWithUrl => f !== null);
 
-    return NextResponse.json({ files: filesWithUrls });
+    return NextResponse.json({ files: filesWithUrls, hasMore });
   } catch (err) {
     console.error("[gallery] Error:", err);
     return NextResponse.json(

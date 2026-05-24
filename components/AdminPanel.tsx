@@ -43,12 +43,6 @@ interface AdminFile extends UploadWithUrl {
   daysLeft?: number;
 }
 
-interface AdminData {
-  files: AdminFile[];
-  stats: AdminStats;
-  galleryEnabled: boolean;
-}
-
 interface CleanupPreview {
   count: number;
   weddingStartTimestamp: string | null;
@@ -606,20 +600,35 @@ function CleanupSection({ onCleaned }: { onCleaned: () => void }) {
 // ─── Main AdminPanel ──────────────────────────────────────────────────────────
 
 export default function AdminPanel() {
-  const [data, setData]               = useState<AdminData | null>(null);
+  // File list (paginated — appended on "load more")
+  const [files, setFiles]             = useState<AdminFile[]>([]);
+  const [stats, setStats]             = useState<AdminStats | null>(null);
+  const [galleryEnabled, setGalleryEnabled] = useState(false);
   const [trashFiles, setTrashFiles]   = useState<AdminFile[]>([]);
+
+  // Loading / error
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState("");
+
+  // Pagination
+  const [page, setPage]       = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal]     = useState(0); // total matching current filter
+
+  // Misc
   const [toggling, setToggling]       = useState(false);
   const [deletingId, setDeletingId]   = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  // View & filter state
-  const [view, setView]           = useState<AdminView>("active");
+  // View & filter state (type/sort sent to server; search is debounced before sending)
+  const [view, setView]             = useState<AdminView>("active");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  const [sortBy, setSortBy]       = useState<SortBy>("newest");
-  const [search, setSearch]       = useState("");
+  const [sortBy, setSortBy]         = useState<SortBy>("newest");
+  const [search, setSearch]         = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Bulk delete modal + result
@@ -629,17 +638,21 @@ export default function AdminPanel() {
   // Bulk download
   const [dlState, setDlState]       = useState<DownloadState>("idle");
   const [dlProgress, setDlProgress] = useState<DownloadProgress>({ current: 0, total: 0 });
-  const [dlFailed, setDlFailed]     = useState<AdminFile[]>([]); // files whose blob-download failed
-  const [dlTotal, setDlTotal]       = useState(0);               // how many we attempted
+  const [dlFailed, setDlFailed]     = useState<AdminFile[]>([]);
+  const [dlTotal, setDlTotal]       = useState(0);
 
   // Mobile save modal
   const [isMobile, setIsMobile]     = useState(false);
   const [mobileFile, setMobileFile] = useState<AdminFile | null>(null);
 
-  // ── Single-file download ─────────────────────────────────────────────────
-  // On mobile: open the MobileSaveModal (share sheet + long-press instruction).
-  // On desktop: direct blob download.
+  // ── Debounce search input ────────────────────────────────────────────────
+  // Only fire a server request 400 ms after the user stops typing.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
 
+  // ── Single-file download ─────────────────────────────────────────────────
   const handleSingleDownload = useCallback((file: AdminFile) => {
     if (isMobile) {
       setMobileFile(file);
@@ -648,43 +661,77 @@ export default function AdminPanel() {
     }
   }, [isMobile]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    setSelectedIds(new Set());
+  // ── Paginated fetch ──────────────────────────────────────────────────────
+  // Page 0 resets the list, fetches settings + trash, and returns global stats.
+  // Page N (>0) appends to the existing list; settings and trash are not re-fetched.
+
+  const fetchData = useCallback(async (pageNum: number) => {
+    if (pageNum === 0) {
+      setLoading(true);
+      setError("");
+      setLoadMoreError("");
+      setFiles([]);
+      setSelectedIds(new Set());
+    } else {
+      setLoadingMore(true);
+      setLoadMoreError("");
+    }
+
+    const params = new URLSearchParams({
+      page: String(pageNum),
+      type: typeFilter,
+      sort: sortBy,
+      q:    debouncedSearch,
+    });
+
     try {
-      const [filesRes, settingsRes, trashRes] = await Promise.all([
-        fetch("/api/admin/files"),
-        fetch("/api/admin/settings"),
-        fetch("/api/admin/trash"),
-      ]);
-      if (!filesRes.ok || !settingsRes.ok) throw new Error("Chyba pri načítaní dát");
+      if (pageNum === 0) {
+        const [filesRes, settingsRes, trashRes] = await Promise.all([
+          fetch(`/api/admin/files?${params}`),
+          fetch("/api/admin/settings"),
+          fetch("/api/admin/trash"),
+        ]);
+        if (!filesRes.ok || !settingsRes.ok) throw new Error("Chyba pri načítaní dát");
 
-      const filesData    = await filesRes.json();
-      const settingsData = await settingsRes.json();
-      const trashData    = trashRes.ok ? await trashRes.json() : { files: [] };
+        const filesData    = await filesRes.json();
+        const settingsData = await settingsRes.json();
+        const trashData    = trashRes.ok ? await trashRes.json() : { files: [] };
 
-      setData({
-        files:          filesData.files,
-        stats:          filesData.stats,
-        galleryEnabled: settingsData.public_gallery_enabled ?? false,
-      });
-      setTrashFiles(trashData.files ?? []);
+        setFiles(filesData.files ?? []);
+        setStats(filesData.stats ?? null);
+        setGalleryEnabled(settingsData.public_gallery_enabled ?? false);
+        setTrashFiles(trashData.files ?? []);
+        setHasMore(filesData.hasMore ?? false);
+        setTotal(filesData.total ?? 0);
+        setPage(0);
+      } else {
+        const filesRes = await fetch(`/api/admin/files?${params}`);
+        if (!filesRes.ok) throw new Error("Chyba pri načítaní dát");
+        const filesData = await filesRes.json();
+        setFiles((prev) => [...prev, ...(filesData.files ?? [])]);
+        setHasMore(filesData.hasMore ?? false);
+        setTotal(filesData.total ?? 0);
+        setPage(pageNum);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nastala chyba");
+      const msg = err instanceof Error ? err.message : "Nastala chyba";
+      if (pageNum === 0) setError(msg);
+      else setLoadMoreError(msg);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, []);
+  }, [typeFilter, sortBy, debouncedSearch]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // Re-fetch from page 0 whenever filters change or on mount
+  useEffect(() => { fetchData(0); }, [fetchData]);
   useEffect(() => { setIsMobile(isMobileDevice()); }, []);
 
   // ── Gallery toggle ────────────────────────────────────────────────────────
 
   const toggleGallery = async () => {
-    if (!data || toggling) return;
-    const next = !data.galleryEnabled;
+    if (toggling) return;
+    const next = !galleryEnabled;
     setToggling(true);
     try {
       const res = await fetch("/api/admin/settings", {
@@ -693,7 +740,7 @@ export default function AdminPanel() {
         body: JSON.stringify({ public_gallery_enabled: next }),
       });
       if (!res.ok) throw new Error("Chyba pri zmene nastavení");
-      setData((d) => d ? { ...d, galleryEnabled: next } : d);
+      setGalleryEnabled(next);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Chyba");
     } finally {
@@ -712,22 +759,19 @@ export default function AdminPanel() {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { error?: string }).error || "Chyba pri mazaní");
       }
-      setData((d) => {
-        if (!d) return d;
-        const newFiles  = d.files.filter((f) => f.id !== id);
-        const deleted   = d.files.find((f) => f.id === id);
-        return {
-          ...d,
-          files: newFiles,
-          stats: {
-            totalFiles:     newFiles.length,
-            totalImages:    newFiles.filter((f) => f.file_type === "image").length,
-            totalVideos:    newFiles.filter((f) => f.file_type === "video").length,
-            totalSizeBytes: d.stats.totalSizeBytes - (deleted?.file_size ?? 0),
-          },
-        };
-      });
+      const deleted = files.find((f) => f.id === id);
+      setFiles((prev) => prev.filter((f) => f.id !== id));
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
+      setTotal((t) => Math.max(0, t - 1));
+      // Update stats inline so the stat cards stay accurate without a full refetch
+      if (deleted && stats) {
+        setStats({
+          totalFiles:     stats.totalFiles - 1,
+          totalImages:    stats.totalImages  - (deleted.file_type === "image" ? 1 : 0),
+          totalVideos:    stats.totalVideos  - (deleted.file_type === "video" ? 1 : 0),
+          totalSizeBytes: stats.totalSizeBytes - (deleted.file_size ?? 0),
+        });
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Chyba pri mazaní");
     } finally {
@@ -738,7 +782,7 @@ export default function AdminPanel() {
   // ── Bulk download ─────────────────────────────────────────────────────────
 
   const bulkDownload = async () => {
-    const toDownload = (data?.files ?? []).filter((f) => selectedIds.has(f.id));
+    const toDownload = files.filter((f) => selectedIds.has(f.id));
     if (toDownload.length === 0) return;
 
     setDlState("preparing");
@@ -791,7 +835,7 @@ export default function AdminPanel() {
       const failedCount  = idsToDelete.length - deletedCount;
       setBulkResult({ deleted: deletedCount, failed: failedCount });
       setShowBulkConfirm(false);
-      await fetchData();
+      await fetchData(0);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Chyba pri hromadnom mazaní");
       setShowBulkConfirm(false);
@@ -811,7 +855,7 @@ export default function AdminPanel() {
         throw new Error((err as { error?: string }).error || "Chyba pri obnovovaní");
       }
       setTrashFiles((prev) => prev.filter((f) => f.id !== id));
-      await fetchData();
+      await fetchData(0);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Chyba pri obnovovaní");
     } finally {
@@ -819,29 +863,11 @@ export default function AdminPanel() {
     }
   };
 
-  // ── Filter + sort ─────────────────────────────────────────────────────────
-
-  const filteredFiles = (data?.files ?? [])
-    .filter((f) => {
-      if (typeFilter !== "all" && f.file_type !== typeFilter) return false;
-      if (search.trim()) {
-        const q = search.trim().toLowerCase();
-        return (
-          f.original_file_name.toLowerCase().includes(q) ||
-          (f.guest_name?.toLowerCase().includes(q) ?? false)
-        );
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === "newest") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      if (sortBy === "oldest") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      return b.file_size - a.file_size;
-    });
-
   // ── Selection helpers ─────────────────────────────────────────────────────
+  // Filtering and sorting are now server-side; `files` is already filtered/sorted.
+  // Selection operates only on the currently loaded files.
 
-  const toggleSelect  = (id: string) => {
+  const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const s = new Set(prev);
       s.has(id) ? s.delete(id) : s.add(id);
@@ -849,9 +875,9 @@ export default function AdminPanel() {
     });
   };
 
-  const selectAll      = () => setSelectedIds(new Set(filteredFiles.map((f) => f.id)));
+  const selectAll      = () => setSelectedIds(new Set(files.map((f) => f.id)));
   const clearSelection = () => setSelectedIds(new Set());
-  const allSelected    = filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.has(f.id));
+  const allSelected    = files.length > 0 && files.every((f) => selectedIds.has(f.id));
 
   // ── Loading / error ───────────────────────────────────────────────────────
 
@@ -869,7 +895,7 @@ export default function AdminPanel() {
       <div className="text-center py-20">
         <p className="text-red-500 text-sm mb-4">{error}</p>
         <button
-          onClick={fetchData}
+          onClick={() => fetchData(0)}
           className="px-4 py-2 bg-stone-100 text-stone-700 rounded-xl text-sm
                      hover:bg-stone-200 transition-colors font-medium"
         >
@@ -879,8 +905,8 @@ export default function AdminPanel() {
     );
   }
 
-  if (!data) return null;
-  const { stats, galleryEnabled } = data;
+  // stats is null only during the very first load (covered by the `loading` check above)
+  if (!stats) return null;
 
   return (
     <>
@@ -967,7 +993,7 @@ export default function AdminPanel() {
         </div>
 
         {/* ── Cleanup section ──────────────────────────────────────────────── */}
-        <CleanupSection onCleaned={fetchData} />
+        <CleanupSection onCleaned={() => fetchData(0)} />
 
         {/* ── View tabs ───────────────────────────────────────────────────── */}
         <div className="flex items-center gap-1 bg-stone-100 rounded-xl p-1 w-fit">
@@ -981,7 +1007,7 @@ export default function AdminPanel() {
                             : "text-stone-500 hover:text-stone-700"}`}
             >
               {v === "active"
-                ? `Aktívne (${data.files.length})`
+                ? `Aktívne (${stats.totalFiles})`
                 : `Kôš (${trashFiles.length})`}
             </button>
           ))}
@@ -1049,7 +1075,7 @@ export default function AdminPanel() {
               </select>
 
               <button
-                onClick={fetchData}
+                onClick={() => fetchData(0)}
                 className="p-2.5 border border-stone-200 rounded-xl text-stone-400
                            hover:text-stone-600 hover:bg-stone-50 transition-colors"
                 title="Obnoviť"
@@ -1059,9 +1085,9 @@ export default function AdminPanel() {
               </button>
             </div>
 
-            {/* Select-all row */}
-            {filteredFiles.length > 0 && (
-              <div className="flex items-center gap-3">
+            {/* Select-all row — operates on loaded files only */}
+            {files.length > 0 && (
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <button
                   onClick={allSelected ? clearSelection : selectAll}
                   className="flex items-center gap-1.5 text-sm text-stone-500
@@ -1072,8 +1098,13 @@ export default function AdminPanel() {
                     : <Square       className="w-4 h-4" />}
                   {allSelected
                     ? "Odznačiť všetky"
-                    : `Vybrať všetky (${filteredFiles.length})`}
+                    : `Vybrať všetky zobrazené (${files.length})`}
                 </button>
+                {total > files.length && (
+                  <span className="text-xs text-stone-400">
+                    Zobrazené: {files.length} z {total}
+                  </span>
+                )}
               </div>
             )}
 
@@ -1082,7 +1113,7 @@ export default function AdminPanel() {
               count={selectedIds.size}
               onDelete={bulkDelete}
               onDownload={bulkDownload}
-              onClear={() => { clearSelection(); setDlState("idle"); setDlFailed([]); setDlTotal(0); }}
+              onClear={() => { clearSelection(); setDlState("idle"); setDlFailed([]); setDlTotal(0); setLoadMoreError(""); }}
               isDeleting={bulkDeleting}
               downloadState={dlState}
               downloadProgress={dlProgress}
@@ -1134,7 +1165,7 @@ export default function AdminPanel() {
             )}
 
             {/* File list */}
-            {filteredFiles.length === 0 ? (
+            {files.length === 0 ? (
               <div className="text-center py-12 text-stone-400 text-sm">
                 {search || typeFilter !== "all"
                   ? "Žiadne súbory zodpovedajú filtru"
@@ -1142,7 +1173,7 @@ export default function AdminPanel() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredFiles.map((file) => (
+                {files.map((file) => (
                   <AdminFileRow
                     key={file.id}
                     file={file}
@@ -1153,6 +1184,26 @@ export default function AdminPanel() {
                     isDeleting={deletingId === file.id}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* ── Load more ──────────────────────────────────────────────── */}
+            {(hasMore || loadMoreError) && (
+              <div className="flex flex-col items-center gap-2 pt-2">
+                {loadMoreError && (
+                  <p className="text-xs text-red-500">{loadMoreError}</p>
+                )}
+                <button
+                  onClick={() => fetchData(page + 1)}
+                  disabled={loadingMore}
+                  className="flex items-center gap-2 px-6 py-2.5 border border-stone-200
+                             rounded-xl text-sm font-medium text-stone-600
+                             hover:bg-stone-50 hover:border-stone-300 transition-colors
+                             disabled:opacity-50"
+                >
+                  {loadingMore && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {loadingMore ? "Načítava sa…" : "Načítať ďalšie"}
+                </button>
               </div>
             )}
           </>
