@@ -104,26 +104,34 @@ export default function WeddingInfo() {
       <Section icon={CalendarDays} title="Priebeh dňa" defaultOpen>
         <div className="mt-1">
           <TimelineItem label="Obrad"                description="Sobášny obrad" />
-          <TimelineItem label="Gratulácie"           description="Spoločné gratulácje s rodinou a priateľmi" />
-          <TimelineItem label="Spoločné fotenie" />
-          <TimelineItem label="Príchod na sálu" />
-          <TimelineItem label="Obed a posedenie" />
-          <TimelineItem label="Svadobná torta" />
+          <TimelineItem label="Gratulácie"           description="Spoločné gratulácie s rodinou a priateľmi" />
+          <TimelineItem label="Spoločná fotka" />
+          <TimelineItem label="Príchod do sály" />
+          <TimelineItem label="Predjedlo" />
           <TimelineItem label="Prvý tanec" />
-          <TimelineItem label="Večera" />
-          <TimelineItem label="Voľná zábava" />
-          <TimelineItem label="Polnočné občerstvenie" last />
+          <TimelineItem label="Polievka a hlavné jedlo" />
+          <TimelineItem label="Rodičovský tanec a prvé tanečné kolo" />
+          <TimelineItem label="Káva a fotenie s mladomanželmi" />
+          <TimelineItem label="Svadobná torta" />
+          <TimelineItem label="Švédske stoly" />
+          <TimelineItem label="Prskavky" />
+          <TimelineItem label="Hádzanie kytice" />
+          <TimelineItem label="Redový tanec" />
+          <TimelineItem label="Voľná zábava :)" last/>
         </div>
       </Section>
 
       {/* Menu */}
       <Section icon={UtensilsCrossed} title="Menu">
         <div className="mt-1">
-          <CourseRow course="Predjedlo"    dish="Carpaccio z hovädzej sviečkovice, parmezán, rukola" />
-          <CourseRow course="Polievka"     dish="Svadobná slepačia polievka s haluškami" />
-          <CourseRow course="Hlavné jedlo" dish="Jahňacie pliecko, zemiaková kaša, grilovaná zelenina" />
-          <CourseRow course="Dezert"       dish="Výber dezertov, čokoládová fontána" />
-          <CourseRow course="Neskoro večer" dish="Polnočné občerstvenie" />
+          <CourseRow course="Predjedlo"    dish="Moderný caprese šalát - paradajka , mozzarella, opečený chlebík, bazalkové pesto
+
+a rukola" />
+          <CourseRow course="Polievka"     dish="Slepačí vývar s domácimi rezancami, mäsom a zeleninou" />
+          <CourseRow course="Hlavné jedlo" dish="Bravčová panenka, zemiakové pyré , hubová
+
+omáčka, glazurovaná mrkva" />
+          <CourseRow course="Neskoro večer" dish="Švédske stoly" />
         </div>
       </Section>
 
